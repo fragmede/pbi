@@ -125,7 +125,8 @@ fn get_clipboard_content() -> (&'static str, Option<Vec<u8>>) {
         } else if nstiff_found {
             let data: Id<NSData> = msg_send![pb, dataForType: &*nstiff_type];
             if let Some(bytes) = data.bytes() {
-                return ("image", Some(bytes.to_vec()));
+                let bytes_slice = std::slice::from_raw_parts(bytes as *const u8, data.length());
+                return ("image", Some(bytes_slice.to_vec()));
             }
         }
     }
