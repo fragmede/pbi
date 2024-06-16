@@ -1,15 +1,14 @@
 use std::env;
 use std::ffi::{CStr, CString};
 use std::io::{self, Write};
-use std::process::{Command, Stdio};
 use std::os::unix::io::AsRawFd;
+use std::process::{Command, Stdio};
 use std::str;
 
 use image::ImageFormat;
 use objc::{msg_send, sel, sel_impl};
-use objc::runtime::{Object};
-use objc::runtime::{Class};
-use objc_foundation::{INSObject, NSString, NSArray, NSData};
+use objc::runtime::{Class, Object};
+use objc_foundation::{INSArray, INSObject, NSArray, NSData, NSString};
 use objc_id::Id;
 
 #[repr(C)]
@@ -104,12 +103,13 @@ fn get_clipboard_content() -> (&'static str, Option<Vec<u8>>) {
 
         let mut nsstring_found = false;
         let mut nstiff_found = false;
+
         for i in 0..types.count() {
             let obj: Id<NSString> = types.object_at(i);
-            if obj == nsstring_type {
+            if obj.is_equal_to(&nsstring_type) {
                 nsstring_found = true;
             }
-            if obj == nstiff_type {
+            if obj.is_equal_to(&nstiff_type) {
                 nstiff_found = true;
             }
         }
