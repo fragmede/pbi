@@ -6,6 +6,7 @@ use std::process::{Command, Stdio};
 use std::str;
 
 use image::ImageFormat;
+use libc::S_IFCHR;
 use objc::{msg_send, sel, sel_impl};
 use objc::runtime::{Class, Object};
 use objc_foundation::{INSArray, INSObject, NSArray, NSData, NSString};
@@ -66,7 +67,7 @@ fn stdout_output_device() -> &'static str {
 
     if statbuf.st_mode & libc::S_IFMT == libc::S_IFREG {
         return "file";
-    } else if statbuf.st_mode & libc::S_IFMT == libc::S_IFCHR {
+    } else if statbuf.st_mode & libc::S_IFMT == S_IFCHR {
         return "terminal";
     }
     "unknown"
@@ -105,7 +106,8 @@ fn get_clipboard_content() -> (&'static str, Option<Vec<u8>>) {
         let mut nstiff_found = false;
 
         for i in 0..types.count() {
-            let obj: Id<NSString> = types.object_at(i);
+            let obj: *mut Object = msg_send![types, objectAtIndex: i];
+            let obj: Id<NSString> = Id::from_ptr(obj);
             if obj.is_equal_to(&nsstring_type) {
                 nsstring_found = true;
             }
