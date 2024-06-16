@@ -126,10 +126,10 @@ fn get_clipboard_content() -> (&'static str, Option<Vec<u8>>) {
             let data: Id<NSData> = msg_send![pb, dataForType: &*nstiff_type];
             let bytes_slice = std::slice::from_raw_parts(data.bytes().as_ptr(), data.bytes().len());
                 return ("image", Some(bytes_slice.to_vec()));
-            }
         }
-        ("unknown", None)
     }
+    ("unknown", None)
+}
 }
 
 fn transform_content(extension: &str, content: &[u8]) -> Option<Vec<u8>> {
