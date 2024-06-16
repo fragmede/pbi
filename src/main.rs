@@ -102,10 +102,22 @@ fn get_clipboard_content() -> (&'static str, Option<Vec<u8>>) {
         let nsstring_type: Id<NSString> = Id::from_ptr(msg_send![Class::get("NSString").unwrap(), stringWithUTF8String: "NSStringPboardType"]);
         let nstiff_type: Id<NSString> = Id::from_ptr(msg_send![Class::get("NSString").unwrap(), stringWithUTF8String: "NSTIFFPboardType"]);
 
-        if types.contains_object(&nsstring_type) {
+        let mut nsstring_found = false;
+        let mut nstiff_found = false;
+        for i in 0..types.count() {
+            let obj: Id<NSString> = types.object_at(i);
+            if obj == nsstring_type {
+                nsstring_found = true;
+            }
+            if obj == nstiff_type {
+                nstiff_found = true;
+            }
+        }
+
+        if nsstring_found {
             let content: Id<NSString> = msg_send![pb, stringForType: nsstring_type];
             return ("text", Some(content.as_bytes().to_vec()));
-        } else if types.contains_object(&nstiff_type) {
+        } else if nstiff_found {
             let data: Id<NSData> = msg_send![pb, dataForType: nstiff_type];
             return ("image", Some(data.bytes().to_vec()));
         }
