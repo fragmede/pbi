@@ -84,7 +84,7 @@ fn get_stdout_filename_extension() -> Result<String, &'static str> {
     }
 
     let filename = unsafe { CStr::from_ptr(resolved_path.as_ptr()) }
-        .to_str()
+    .to_str()
         .unwrap();
 
     if let Some(period) = filename.rfind('.') {
@@ -124,13 +124,14 @@ fn get_clipboard_content() -> (&'static str, Option<Vec<u8>>) {
             return ("text", Some(bytes.to_vec()));
         } else if nstiff_found {
             let data: Id<NSData> = msg_send![pb, dataForType: &*nstiff_type];
-            if let Some(bytes) = data.bytes() {
-                let bytes_slice = std::slice::from_raw_parts(bytes.as_ptr(), data.len());
+            if let Some(data) = data.bytes() { let bytes = data.bytes() {
+                let bytes_slice = std::slice::from_raw_parts(bytes.as_ptr(), bytes.len());
                 return ("image", Some(bytes_slice.to_vec()));
             }
+            }
         }
+        ("unknown", None)
     }
-    ("unknown", None)
 }
 
 fn transform_content(extension: &str, content: &[u8]) -> Option<Vec<u8>> {
