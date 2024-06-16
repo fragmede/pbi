@@ -108,10 +108,10 @@ fn get_clipboard_content() -> (&'static str, Option<Vec<u8>>) {
         for i in 0..types.count() {
             let obj: *mut Object = msg_send![types, objectAtIndex: i];
             let obj: Id<NSString> = Id::from_ptr(obj as *mut NSString);
-            if msg_send![obj, isEqualToString: msg_send![nsstring_type, copy]] {
+            if msg_send![obj, isEqualToString: msg_send![nsstring_type, copy] as *mut Object] {
                 nsstring_found = true;
             }
-            if msg_send![obj, isEqualToString: msg_send![nstiff_type, copy]] {
+            if msg_send![obj, isEqualToString: msg_send![nstiff_type, copy] as *mut Object] {
                 nstiff_found = true;
             }
         }
