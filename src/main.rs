@@ -9,7 +9,7 @@ use image::ImageFormat;
 use libc::S_IFCHR;
 use objc::{msg_send, sel, sel_impl};
 use objc::runtime::{Class, Object};
-use objc_foundation::{INSArray, NSArray, NSData, NSString};
+use objc_foundation::{INSArray, INSObject, NSArray, NSData, NSString};
 use objc_id::Id;
 
 #[repr(C)]
@@ -107,26 +107,21 @@ fn get_clipboard_content() -> (&'static str, Option<Vec<u8>>) {
 
         for i in 0..types.count() {
             let obj: *mut Object = msg_send![types, objectAtIndex: i];
-            let obj: Id<NSString> = Id::from_ptr(obj as *mut NSString);
-            if msg_send![obj, isEqualToString: msg_send![nsstring_type, copy] as *mut Object] {
+            let obj: Id<NSString> = Id::from_ptr(obj);
+            if msg_send![obj, isEqualTo: &*nsstring_type] {
                 nsstring_found = true;
             }
-            if msg_send![obj, isEqualToString: msg_send![nstiff_type, copy] as *mut Object] {
+            if msg_send![obj, isEqualTo: &*nstiff_type] {
                 nstiff_found = true;
             }
         }
 
         if nsstring_found {
-            let content: Id<NSString> = msg_send![pb, stringForType: msg_send![nsstring_type, copy]];
-            let c_str: *const i8 = msg_send![content, UTF8String];
-            let rust_str = CStr::from_ptr(c_str).to_str().unwrap();
-            return ("text", Some(rust_str.as_bytes().to_vec()));
+            let content: Id<NSString> = msg_send![pb, stringForType: &*nsstring_type];
+            return ("text", Some(content.as_bytes().to_vec()));
         } else if nstiff_found {
-            let data: Id<NSData> = msg_send![pb, dataForType: msg_send![nstiff_type, copy]];
-            let bytes: *const u8 = msg_send![data, bytes];
-            let length: usize = msg_send![data, length];
-            let slice = std::slice::from_raw_parts(bytes, length);
-            return ("image", Some(slice.to_vec()));
+            let data: Id<NSData> = msg_send![pb, dataForType: &*nstiff_type];
+            return ("image", Some(data.bytes().to_vec()));
         }
     }
     ("unknown", None)
@@ -138,6 +133,7 @@ fn transform_content(extension: &str, content: &[u8]) -> Option<Vec<u8>> {
         (vec!["jpg", "jpeg"], ImageFormat::Jpeg),
         (vec!["gif"], ImageFormat::Gif),
         (vec!["bmp"], ImageFormat::Bmp),
+        (vec!["heif"], ImageFormat::Heif),
         (vec!["webp"], ImageFormat::WebP),
     ];
 
@@ -145,10 +141,9 @@ fn transform_content(extension: &str, content: &[u8]) -> Option<Vec<u8>> {
         for (exts, format) in formats.iter() {
             if exts.contains(&extension.to_lowercase().as_str()) {
                 let img = image::load_from_memory_with_format(content, ImageFormat::Tiff).unwrap();
-                use std::io::Cursor;
-                let mut output = Cursor::new(Vec::new());
+                let mut output = Vec::new();
                 img.write_to(&mut output, *format).unwrap();
-                return Some(output.into_inner());
+                return Some(output);
             }
         }
     }
