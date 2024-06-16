@@ -1,6 +1,6 @@
 use std::env;
-use std::ffi::CString;
 use std::fs::File;
+use std::ffi::{CStr, CString};
 use std::io::{self, Write};
 use std::process::{Command, Stdio};
 use std::os::unix::io::AsRawFd;
@@ -184,9 +184,9 @@ fn pbpaste() {
                             let mut child = Command::new("magick")
                                 .arg("-")
                                 .arg("sixel:-")
-                                .stdin(io::stdio::piped())
-                                .stdout(io::stdio::inherit())
-                                .stderr(io::stdio::inherit())
+                                .stdin(Stdio::piped())
+                                .stdout(Stdio::inherit())
+                                .stderr(Stdio::inherit())
                                 .spawn()
                                 .unwrap();
 
