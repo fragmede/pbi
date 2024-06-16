@@ -1,21 +1,16 @@
 use std::env;
-use std::fs::File;
 use std::ffi::{CStr, CString};
 use std::io::{self, Write};
 use std::process::{Command, Stdio};
 use std::os::unix::io::AsRawFd;
-use std::process::Command;
-use std::ptr;
-use std::slice;
 use std::str;
 
 use image::ImageFormat;
 use objc::{msg_send, sel, sel_impl};
-use objc::runtime::{Object, BOOL, YES};
-use objc::runtime::{Class, Sel};
+use objc::runtime::{Object};
+use objc::runtime::{Class};
 use objc_foundation::{INSObject, NSString, NSArray, NSData};
 use objc_id::Id;
-use std::ffi::CStr;
 
 #[repr(C)]
 struct Stat {
