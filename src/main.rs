@@ -157,17 +157,24 @@ fn transform_content(extension: &str, content: &[u8]) -> Option<Vec<u8>> {
 }
 
 fn term_supports_sixel() -> bool {
-    match env::var("TERM_PROGRAM") {
-        Ok(val) if val == "Apple_Terminal" => return false,
-        Ok(val) if val == "iTerm.app" => return true,
-        _ => {}
+    if let Ok(term_program) = env::var("TERM_PROGRAM") {
+        if term_program == "Apple_Terminal" {
+            return false;
+        } else if term_program == "iTerm.app" {
+            return true;
+        }
     }
 
     if let Ok(output) = Command::new("tput").arg("setab").arg("0").output() {
-        if str::from_utf8(&output.stdout).unwrap_or("").contains("sixel")
-            || str::from_utf8(&output.stderr).unwrap_or("").contains("sixel")
-        {
-            return true;
+        if let Ok(stdout) = str::from_utf8(&output.stdout) {
+            if stdout.contains("sixel") {
+                return true;
+            }
+        }
+        if let Ok(stderr) = str::from_utf8(&output.stderr) {
+            if stderr.contains("sixel") {
+                return true;
+            }
         }
     }
 
