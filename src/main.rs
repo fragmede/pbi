@@ -138,7 +138,6 @@ fn transform_content(extension: &str, content: &[u8]) -> Option<Vec<u8>> {
         (vec!["jpg", "jpeg"], ImageFormat::Jpeg),
         (vec!["gif"], ImageFormat::Gif),
         (vec!["bmp"], ImageFormat::Bmp),
-        (vec!["heif"], ImageFormat::Heif),
         (vec!["webp"], ImageFormat::WebP),
     ];
 
