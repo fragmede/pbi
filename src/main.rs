@@ -124,7 +124,9 @@ fn get_clipboard_content() -> (&'static str, Option<Vec<u8>>) {
             return ("text", Some(bytes.to_vec()));
         } else if nstiff_found {
             let data: Id<NSData> = msg_send![pb, dataForType: &*nstiff_type];
-            return ("image", Some(data.bytes().to_vec()));
+            if let Some(bytes) = data.bytes() {
+                return ("image", Some(bytes.to_vec()));
+            }
         }
     }
     ("unknown", None)
