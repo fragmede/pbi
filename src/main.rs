@@ -143,10 +143,12 @@ fn transform_content(extension: &str, content: &[u8]) -> Option<Vec<u8>> {
     if !extension.is_empty() {
         for (exts, format) in formats.iter() {
             if exts.contains(&extension.to_lowercase().as_str()) {
-                let img = image::load_from_memory_with_format(content, ImageFormat::Tiff).unwrap();
-                let mut output = Cursor::new(Vec::new());
-                img.write_to(&mut output, *format).unwrap();
-                return Some(output.into_inner());
+                if let Ok(img) = image::load_from_memory_with_format(content, ImageFormat::Tiff) {
+                    let mut output = Cursor::new(Vec::new());
+                    if img.write_to(&mut output, *format).is_ok() {
+                        return Some(output.into_inner());
+                    }
+                }
             }
         }
     }
