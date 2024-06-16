@@ -9,7 +9,7 @@ use image::ImageFormat;
 use libc::S_IFCHR;
 use objc::{msg_send, sel, sel_impl};
 use objc::runtime::{Class, Object};
-use objc_foundation::{INSArray, INSObject, NSArray, NSData, NSString};
+use objc_foundation::{INSArray, NSArray, NSData, NSString};
 use objc_id::Id;
 
 #[repr(C)]
@@ -108,21 +108,21 @@ fn get_clipboard_content() -> (&'static str, Option<Vec<u8>>) {
         for i in 0..types.count() {
             let obj: *mut Object = msg_send![types, objectAtIndex: i];
             let obj: Id<NSString> = Id::from_ptr(obj as *mut NSString);
-            if msg_send![obj, isEqualToString: nsstring_type] {
+            if msg_send![obj, isEqualToString: nsstring_type.clone()] {
                 nsstring_found = true;
             }
-            if msg_send![obj, isEqualToString: nstiff_type] {
+            if msg_send![obj, isEqualToString: nstiff_type.clone()] {
                 nstiff_found = true;
             }
         }
 
         if nsstring_found {
-            let content: Id<NSString> = msg_send![pb, stringForType: nsstring_type];
+            let content: Id<NSString> = msg_send![pb, stringForType: nsstring_type.clone()];
             let c_str: *const i8 = msg_send![content, UTF8String];
             let rust_str = CStr::from_ptr(c_str).to_str().unwrap();
             return ("text", Some(rust_str.as_bytes().to_vec()));
         } else if nstiff_found {
-            let data: Id<NSData> = msg_send![pb, dataForType: nstiff_type];
+            let data: Id<NSData> = msg_send![pb, dataForType: nstiff_type.clone()];
             let bytes: *const u8 = msg_send![data, bytes];
             let length: usize = msg_send![data, length];
             let slice = std::slice::from_raw_parts(bytes, length);
