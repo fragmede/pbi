@@ -4,6 +4,7 @@ use std::io::{self, Cursor, Write};
 use std::os::unix::io::AsRawFd;
 use std::process::{Command, Stdio};
 use std::str;
+use std::error::Error;
 
 use image::ImageFormat;
 use libc::S_IFCHR;
@@ -11,6 +12,8 @@ use objc::{msg_send, sel, sel_impl};
 use objc::runtime::{Class, Object};
 use objc_foundation::{INSArray, INSData, NSArray, NSData, NSString};
 use objc_id::Id;
+use std::fmt;
+
 
 #[repr(C)]
 struct Stat {
@@ -38,6 +41,35 @@ extern "C" {
     fn fstat(fd: i32, buf: *mut Stat) -> i32;
     fn realpath(path: *const i8, resolved_path: *mut i8) -> *mut i8;
 }
+
+#[derive(Debug)]
+struct CocoaClassError {
+    class_name: &'static str,
+    details: String,
+}
+
+
+impl CocoaClassError {
+    fn new(class_name: &'static str, msg: &str) -> CocoaClassError {
+        CocoaClassError {
+            class_name,
+            details: msg.to_string(),
+        }
+    }
+}
+
+impl fmt::Display for CocoaClassError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}: {}", self.class_name, self.details)
+    }
+}
+
+impl Error for CocoaClassError {
+    fn description(&self) -> &str {
+        &self.details
+    }
+}
+
 
 fn stdout_output_device() -> &'static str {
     let mut statbuf = Stat {
@@ -94,6 +126,16 @@ fn get_stdout_filename_extension() -> Result<String, &'static str> {
     Ok(String::new())
 }
 
+fn nsstring_to_str(nsstring: &NSString) -> Result<&str, Box<dyn Error>> {
+    unsafe {
+        let c_str: *const libc::c_char = msg_send![nsstring, UTF8String];
+        if c_str.is_null() {
+            return Err(Box::new(CocoaClassError::new("NSString", "UTF8String returned null")));
+        }
+        Ok(CStr::from_ptr(c_str).to_str()?)
+    }
+}
+
 fn get_clipboard_content() -> (&'static str, Option<Vec<u8>>) {
     unsafe {
         let pb: *mut Object = msg_send![Class::get("NSPasteboard").unwrap(), generalPasteboard];
@@ -108,12 +150,28 @@ fn get_clipboard_content() -> (&'static str, Option<Vec<u8>>) {
         for i in 0..types.count() {
             let obj: *mut Object = msg_send![types, objectAtIndex: i];
             let obj: Id<NSString> = Id::from_ptr(obj as *mut NSString);
-            if msg_send![obj, isEqualTo: &*nsstring_type] {
+
+			let is_nsstring_type: bool = msg_send![obj, isEqualToString: &*nsstring_type];
+			let is_nstiff_type: bool = msg_send![obj, isEqualToString: &*nstiff_type];
+
+            let obj_str = nsstring_to_str(&*obj);
+            let nsstring_str = nsstring_to_str(&*nsstring_type);
+            let nstiff_str = nsstring_to_str(&*nstiff_type);
+
+
+            println!("Object at index {}: {:?}", i, obj);
+            println!("Object string: {:#?}", obj_str);
+            println!("NSStringPboardType: {:#?}", nsstring_str);
+            println!("NSTIFFPboardType: {:#?}", nstiff_str);
+
+            if obj_str == nsstring_str {
                 nsstring_found = true;
             }
-            if msg_send![obj, isEqualTo: &*nstiff_type] {
+            if obj_str == nstiff_str {
                 nstiff_found = true;
             }
+
+            println!("{:#?}", obj);
         }
 
         if nsstring_found {
@@ -226,8 +284,8 @@ fn pbpaste() {
                 }
             }
         }
-        _ => {
-            println!("Unsupported clipboard content");
+        other => {
+            println!("Unsupported clipboard content {}", other);
         }
     }
 }
