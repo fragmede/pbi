@@ -145,9 +145,10 @@ fn transform_content(extension: &str, content: &[u8]) -> Option<Vec<u8>> {
         for (exts, format) in formats.iter() {
             if exts.contains(&extension.to_lowercase().as_str()) {
                 let img = image::load_from_memory_with_format(content, ImageFormat::Tiff).unwrap();
-                let mut output = Vec::new();
+                use std::io::Cursor;
+                let mut output = Cursor::new(Vec::new());
                 img.write_to(&mut output, *format).unwrap();
-                return Some(output);
+                return Some(output.into_inner());
             }
         }
     }
