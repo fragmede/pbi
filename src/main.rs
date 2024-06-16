@@ -9,7 +9,7 @@ use image::ImageFormat;
 use libc::S_IFCHR;
 use objc::{msg_send, sel, sel_impl};
 use objc::runtime::{Class, Object};
-use objc_foundation::{INSArray, INSData, INSObject, NSArray, NSData, NSString};
+use objc_foundation::{INSArray, INSData, NSArray, NSData, NSString};
 use objc_id::Id;
 
 #[repr(C)]
@@ -118,7 +118,7 @@ fn get_clipboard_content() -> (&'static str, Option<Vec<u8>>) {
 
         if nsstring_found {
             let content: Id<NSString> = msg_send![pb, stringForType: &*nsstring_type];
-            let content_bytes = msg_send![content, UTF8String] as *const u8;
+            let content_bytes: *const u8 = msg_send![content, UTF8String];
             let length = msg_send![content, lengthOfBytesUsingEncoding: 4 /* NSUTF8StringEncoding */];
             let bytes = std::slice::from_raw_parts(content_bytes, length);
             return ("text", Some(bytes.to_vec()));
