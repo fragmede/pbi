@@ -118,7 +118,9 @@ fn get_clipboard_content() -> (&'static str, Option<Vec<u8>>) {
 
         if nsstring_found {
             let content: Id<NSString> = msg_send![pb, stringForType: nsstring_type];
-            return ("text", Some(content.as_str().as_bytes().to_vec()));
+            let c_str: *const i8 = msg_send![content, UTF8String];
+            let rust_str = CStr::from_ptr(c_str).to_str().unwrap();
+            return ("text", Some(rust_str.as_bytes().to_vec()));
         } else if nstiff_found {
             let data: Id<NSData> = msg_send![pb, dataForType: nstiff_type];
             return ("image", Some(data.bytes().to_vec()));
