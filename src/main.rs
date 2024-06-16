@@ -1,6 +1,6 @@
 use std::env;
 use std::ffi::{CStr, CString};
-use std::io::{self, Write};
+use std::io::{self, Cursor, Write};
 use std::os::unix::io::AsRawFd;
 use std::process::{Command, Stdio};
 use std::str;
@@ -9,7 +9,7 @@ use image::ImageFormat;
 use libc::S_IFCHR;
 use objc::{msg_send, sel, sel_impl};
 use objc::runtime::{Class, Object};
-use objc_foundation::{INSArray, INSObject, NSArray, NSData, NSString};
+use objc_foundation::{INSArray, INSData, INSObject, NSArray, NSData, NSString};
 use objc_id::Id;
 
 #[repr(C)]
@@ -107,7 +107,7 @@ fn get_clipboard_content() -> (&'static str, Option<Vec<u8>>) {
 
         for i in 0..types.count() {
             let obj: *mut Object = msg_send![types, objectAtIndex: i];
-            let obj: Id<NSString> = Id::from_ptr(obj);
+            let obj: Id<NSString> = Id::from_ptr(obj as *mut NSString);
             if msg_send![obj, isEqualTo: &*nsstring_type] {
                 nsstring_found = true;
             }
@@ -118,7 +118,10 @@ fn get_clipboard_content() -> (&'static str, Option<Vec<u8>>) {
 
         if nsstring_found {
             let content: Id<NSString> = msg_send![pb, stringForType: &*nsstring_type];
-            return ("text", Some(content.as_bytes().to_vec()));
+            let content_bytes = msg_send![content, UTF8String] as *const u8;
+            let length = msg_send![content, lengthOfBytesUsingEncoding: 4 /* NSUTF8StringEncoding */];
+            let bytes = std::slice::from_raw_parts(content_bytes, length);
+            return ("text", Some(bytes.to_vec()));
         } else if nstiff_found {
             let data: Id<NSData> = msg_send![pb, dataForType: &*nstiff_type];
             return ("image", Some(data.bytes().to_vec()));
@@ -133,7 +136,6 @@ fn transform_content(extension: &str, content: &[u8]) -> Option<Vec<u8>> {
         (vec!["jpg", "jpeg"], ImageFormat::Jpeg),
         (vec!["gif"], ImageFormat::Gif),
         (vec!["bmp"], ImageFormat::Bmp),
-        (vec!["heif"], ImageFormat::Heif),
         (vec!["webp"], ImageFormat::WebP),
     ];
 
@@ -141,9 +143,9 @@ fn transform_content(extension: &str, content: &[u8]) -> Option<Vec<u8>> {
         for (exts, format) in formats.iter() {
             if exts.contains(&extension.to_lowercase().as_str()) {
                 let img = image::load_from_memory_with_format(content, ImageFormat::Tiff).unwrap();
-                let mut output = Vec::new();
+                let mut output = Cursor::new(Vec::new());
                 img.write_to(&mut output, *format).unwrap();
-                return Some(output);
+                return Some(output.into_inner());
             }
         }
     }
