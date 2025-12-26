@@ -2,10 +2,9 @@ use std::env;
 use std::ffi::{CStr, CString};
 use std::io::{self, Cursor, Write};
 use std::os::unix::io::AsRawFd;
-use std::process::{Command, Stdio};
-use std::str;
 use std::error::Error;
 
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use image::ImageFormat;
 use libc::S_IFCHR;
 use objc::{msg_send, sel, sel_impl};
@@ -13,7 +12,6 @@ use objc::runtime::{Class, Object};
 use objc_foundation::{INSArray, INSData, NSArray, NSData, NSString};
 use objc_id::Id;
 use std::fmt;
-
 
 #[repr(C)]
 struct Stat {
@@ -48,7 +46,6 @@ struct CocoaClassError {
     details: String,
 }
 
-
 impl CocoaClassError {
     fn new(class_name: &'static str, msg: &str) -> CocoaClassError {
         CocoaClassError {
@@ -69,7 +66,6 @@ impl Error for CocoaClassError {
         &self.details
     }
 }
-
 
 fn stdout_output_device() -> &'static str {
     let mut statbuf = Stat {
@@ -136,13 +132,17 @@ fn nsstring_to_str(nsstring: &NSString) -> Result<&str, Box<dyn Error>> {
     }
 }
 
-fn get_clipboard_content() -> (&'static str, Option<Vec<u8>>) {
+fn get_clipboard_content() -> Result<(&'static str, Option<Vec<u8>>), Box<dyn Error>> {
     unsafe {
         let pb: *mut Object = msg_send![Class::get("NSPasteboard").unwrap(), generalPasteboard];
         let types: Id<NSArray<NSString>> = msg_send![pb, types];
 
-        let nsstring_type: Id<NSString> = Id::from_ptr(msg_send![Class::get("NSString").unwrap(), stringWithUTF8String: "NSStringPboardType"]);
-        let nstiff_type: Id<NSString> = Id::from_ptr(msg_send![Class::get("NSString").unwrap(), stringWithUTF8String: "NSTIFFPboardType"]);
+        let nsstring_type: Id<NSString> = Id::from_ptr(msg_send![Class::get("NSString").unwrap(), stringWithUTF8String: "NSStringPboardType\0"]);
+        let nstiff_type: Id<NSString> = Id::from_ptr(msg_send![Class::get("NSString").unwrap(), stringWithUTF8String: "NSTIFFPboardType\0"]);
+		let nsstring_str = nsstring_to_str(&*nsstring_type)?;
+		let nstiff_str = nsstring_to_str(&*nstiff_type)?;
+		println!("NSStringPboardType: '{}'", nsstring_str);
+		println!("NSTIFFPboardType: '{}'", nstiff_str);
 
         let mut nsstring_found = false;
         let mut nstiff_found = false;
@@ -150,43 +150,34 @@ fn get_clipboard_content() -> (&'static str, Option<Vec<u8>>) {
         for i in 0..types.count() {
             let obj: *mut Object = msg_send![types, objectAtIndex: i];
             let obj: Id<NSString> = Id::from_ptr(obj as *mut NSString);
+            let obj_str = nsstring_to_str(&*obj)?;
 
-			let is_nsstring_type: bool = msg_send![obj, isEqualToString: &*nsstring_type];
-			let is_nstiff_type: bool = msg_send![obj, isEqualToString: &*nstiff_type];
-
-            let obj_str = nsstring_to_str(&*obj);
-            let nsstring_str = nsstring_to_str(&*nsstring_type);
-            let nstiff_str = nsstring_to_str(&*nstiff_type);
-
-
-            println!("Object at index {}: {:?}", i, obj);
-            println!("Object string: {:#?}", obj_str);
-            println!("NSStringPboardType: {:#?}", nsstring_str);
-            println!("NSTIFFPboardType: {:#?}", nstiff_str);
+            println!("Object at index '{}': '{:?}'", i, obj);
+            println!("Object string: '{}'", obj_str);
 
             if obj_str == nsstring_str {
                 nsstring_found = true;
             }
-            if obj_str == nstiff_str {
+            else if obj_str == nstiff_str {
                 nstiff_found = true;
             }
-
-            println!("{:#?}", obj);
         }
 
         if nsstring_found {
+            //println!("NSStringPboardType found");
             let content: Id<NSString> = msg_send![pb, stringForType: &*nsstring_type];
             let content_bytes: *const u8 = msg_send![content, UTF8String];
             let length = msg_send![content, lengthOfBytesUsingEncoding: 4 /* NSUTF8StringEncoding */];
             let bytes = std::slice::from_raw_parts(content_bytes, length);
-            return ("text", Some(bytes.to_vec()));
+            return Ok(("text", Some(bytes.to_vec())));
         } else if nstiff_found {
+            println!("NSTIFFPboardType found");
             let data: Id<NSData> = msg_send![pb, dataForType: &*nstiff_type];
             let bytes_slice = std::slice::from_raw_parts(data.bytes().as_ptr(), data.bytes().len());
-                return ("image", Some(bytes_slice.to_vec()));
+            return Ok(("image", Some(bytes_slice.to_vec())));
         }
-    ("unknown", None)
-}
+        Ok(("unknown", None))
+    }
 }
 
 fn transform_content(extension: &str, content: &[u8]) -> Option<Vec<u8>> {
@@ -214,23 +205,25 @@ fn transform_content(extension: &str, content: &[u8]) -> Option<Vec<u8>> {
     None
 }
 
-fn term_supports_sixel() -> bool {
-    if let Ok(term_program) = env::var("TERM_PROGRAM") {
-        if term_program == "Apple_Terminal" {
-            return false;
-        } else if term_program == "iTerm.app" {
+fn term_supports_kitty() -> bool {
+    // Check for Kitty terminal
+    if env::var("KITTY_WINDOW_ID").is_ok() {
+        return true;
+    }
+
+    // Check TERM variable for kitty
+    if let Ok(term) = env::var("TERM") {
+        if term.contains("kitty") {
             return true;
         }
     }
 
-    if let Ok(output) = Command::new("tput").arg("setab").arg("0").output() {
-        if let Ok(stdout) = str::from_utf8(&output.stdout) {
-            if stdout.contains("sixel") {
-                return true;
-            }
-        }
-        if let Ok(stderr) = str::from_utf8(&output.stderr) {
-            if stderr.contains("sixel") {
+    // Check TERM_PROGRAM for known Kitty graphics protocol supporters
+    if let Ok(term_program) = env::var("TERM_PROGRAM") {
+        // WezTerm, Ghostty, and Kitty support Kitty graphics protocol
+        let kitty_supporters = ["WezTerm", "ghostty", "kitty"];
+        for supporter in &kitty_supporters {
+            if term_program.to_lowercase().contains(&supporter.to_lowercase()) {
                 return true;
             }
         }
@@ -239,53 +232,99 @@ fn term_supports_sixel() -> bool {
     false
 }
 
-fn pbpaste() {
-    let (content_type, content) = get_clipboard_content();
+fn write_kitty_graphics(image_data: &[u8]) -> io::Result<()> {
+    // Convert TIFF to PNG first
+    let img = image::load_from_memory_with_format(image_data, ImageFormat::Tiff)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
-    match content_type {
-        "text" => {
-            if let Some(text) = content {
-                println!("{}", String::from_utf8_lossy(&text));
-            }
+    let mut png_data = Cursor::new(Vec::new());
+    img.write_to(&mut png_data, ImageFormat::Png)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+
+    let png_bytes = png_data.into_inner();
+    let encoded = BASE64.encode(&png_bytes);
+
+    let mut stdout = io::stdout();
+
+    // Kitty graphics protocol:
+    // ESC_G<control data>;<payload>ESC\
+    // a=T: transmit and display
+    // f=100: PNG format
+    // For large payloads, we chunk with m=1 (more data) and m=0 (last chunk)
+    const CHUNK_SIZE: usize = 4096;
+    let chunks: Vec<&str> = encoded.as_bytes().chunks(CHUNK_SIZE)
+        .map(|c| std::str::from_utf8(c).unwrap())
+        .collect();
+
+    for (i, chunk) in chunks.iter().enumerate() {
+        let is_last = i == chunks.len() - 1;
+        let is_first = i == 0;
+
+        if is_first && is_last {
+            // Single chunk - no need for m parameter
+            write!(stdout, "\x1b_Ga=T,f=100;{}\x1b\\", chunk)?;
+        } else if is_first {
+            // First chunk of multi-chunk transmission
+            write!(stdout, "\x1b_Ga=T,f=100,m=1;{}\x1b\\", chunk)?;
+        } else if is_last {
+            // Last chunk
+            write!(stdout, "\x1b_Gm=0;{}\x1b\\", chunk)?;
+        } else {
+            // Middle chunk
+            write!(stdout, "\x1b_Gm=1;{}\x1b\\", chunk)?;
         }
-        "image" => {
-            if let Some(image_data) = content {
-                match stdout_output_device() {
-                    "file" => {
-                        if let Ok(extension) = get_stdout_filename_extension() {
-                            if let Some(transformed) = transform_content(&extension, &image_data) {
-                                io::stdout().write_all(&transformed).unwrap();
+    }
+
+    // Add newline after image
+    writeln!(stdout)?;
+    stdout.flush()?;
+
+    Ok(())
+}
+
+fn pbpaste() {
+    let result = get_clipboard_content();
+    match result {
+        Ok((content_type, content)) => {
+            match content_type {
+                "text" => {
+                    if let Some(text) = content {
+                        println!("{}", String::from_utf8_lossy(&text));
+                    }
+                }
+                "image" => {
+                    if let Some(image_data) = content {
+                        match stdout_output_device() {
+                            "file" => {
+                                if let Ok(extension) = get_stdout_filename_extension() {
+                                    if let Some(transformed) = transform_content(&extension, &image_data) {
+                                        io::stdout().write_all(&transformed).unwrap();
+                                    }
+                                }
+                            }
+                            "terminal" => {
+                                if term_supports_kitty() {
+                                    if let Err(e) = write_kitty_graphics(&image_data) {
+                                        eprintln!("Error displaying image: {}", e);
+                                    }
+                                } else {
+                                    eprintln!("Terminal does not support Kitty graphics protocol.");
+                                    eprintln!("Supported terminals: Kitty, WezTerm, Ghostty");
+                                }
+                            }
+                            _ => {
+                                println!("Unsupported clipboard content");
                             }
                         }
                     }
-                    "terminal" => {
-                        if term_supports_sixel() {
-                            let mut child = Command::new("magick")
-                                .arg("-")
-                                .arg("sixel:-")
-                                .stdin(Stdio::piped())
-                                .stdout(Stdio::inherit())
-                                .stderr(Stdio::inherit())
-                                .spawn()
-                                .unwrap();
-
-                            if let Some(stdin) = child.stdin.as_mut() {
-                                stdin.write_all(&image_data).unwrap();
-                            }
-
-                            child.wait().unwrap();
-                        } else {
-                            println!("Cowardly not printing image data to stdout.");
-                        }
-                    }
-                    _ => {
-                        println!("Unsupported clipboard content");
-                    }
+                }
+                other => {
+                    println!("Unsupported clipboard content {}", other);
                 }
             }
         }
-        other => {
-            println!("Unsupported clipboard content {}", other);
+        Err(err) => {
+            eprintln!("Error getting clipboard content: {}", err);
         }
     }
 }
