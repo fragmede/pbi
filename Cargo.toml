@@ -3,6 +3,10 @@ name = "pbipaste"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "PBI"
+path = "src/main.rs"
+
 [dependencies]
 base64 = "0.22"
 image = "0.25.1"
