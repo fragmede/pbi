@@ -11,3 +11,10 @@
 - `cargo check` passed.
 - `cargo test` passed with 2 unit tests.
 - `cargo build --bin PBI` produced `target/debug/PBI`.
+
+## Follow-up: Clean Cargo Check Failure
+
+- [x] Reproduce the clean-checkout compile failure.
+- [x] Identify missing committed `Cargo.lock` as the dependency-resolution gap.
+- [x] Verify a clean checkout with `Cargo.lock`.
+- [x] Commit the scoped lockfile fix.
