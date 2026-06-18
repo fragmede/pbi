@@ -57,3 +57,7 @@ with an image on your paste board you can do:
 
 and the image will display directly in your terminal.
 
+If you override `TERM` and terminal image auto-detection fails, force the
+protocol explicitly:
+
+    export PBI_IMAGE_PROTOCOL=sixel

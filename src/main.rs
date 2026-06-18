@@ -22,6 +22,7 @@ const SIXEL_COLOR_LEVELS: usize = 6;
 const SIXEL_PALETTE_SIZE: usize = SIXEL_COLOR_LEVELS * SIXEL_COLOR_LEVELS * SIXEL_COLOR_LEVELS;
 const SIXEL_TRANSPARENT: u8 = u8::MAX;
 const SIXEL_ALPHA_THRESHOLD: u8 = 128;
+const PBI_IMAGE_PROTOCOL_ENV: &str = "PBI_IMAGE_PROTOCOL";
 
 #[repr(C)]
 struct Stat {
@@ -707,11 +708,28 @@ fn contains_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
     haystack.to_lowercase().contains(&needle.to_lowercase())
 }
 
+fn terminal_image_protocol_override(value: &str) -> Option<TerminalImageProtocol> {
+    let value = value.trim();
+
+    if value.eq_ignore_ascii_case("kitty") {
+        Some(TerminalImageProtocol::Kitty)
+    } else if value.eq_ignore_ascii_case("sixel") {
+        Some(TerminalImageProtocol::Sixel)
+    } else {
+        None
+    }
+}
+
 fn terminal_image_protocol_from_env(
+    pbi_image_protocol: Option<&str>,
     kitty_window_id: Option<&str>,
     term: Option<&str>,
     term_program: Option<&str>,
 ) -> Option<TerminalImageProtocol> {
+    if let Some(protocol) = pbi_image_protocol.and_then(terminal_image_protocol_override) {
+        return Some(protocol);
+    }
+
     if term_program.is_some_and(|term_program| {
         ["WezTerm", "ghostty", "kitty"]
             .iter()
@@ -737,11 +755,13 @@ fn terminal_image_protocol_from_env(
 }
 
 fn terminal_image_protocol() -> Option<TerminalImageProtocol> {
+    let pbi_image_protocol = env::var(PBI_IMAGE_PROTOCOL_ENV).ok();
     let kitty_window_id = env::var("KITTY_WINDOW_ID").ok();
     let term = env::var("TERM").ok();
     let term_program = env::var("TERM_PROGRAM").ok();
 
     terminal_image_protocol_from_env(
+        pbi_image_protocol.as_deref(),
         kitty_window_id.as_deref(),
         term.as_deref(),
         term_program.as_deref(),
@@ -1008,6 +1028,7 @@ fn pbpaste(config: &Config) -> Result<(), Box<dyn Error>> {
                 None => {
                     eprintln!("Terminal does not support Kitty graphics or Sixel output.");
                     eprintln!("Supported terminals: Kitty, WezTerm, Ghostty, iTerm2");
+                    eprintln!("Set {PBI_IMAGE_PROTOCOL_ENV}=sixel to force Sixel output.");
                 }
             },
             _ => {
@@ -1022,6 +1043,10 @@ fn pbpaste(config: &Config) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+fn env_debug_value(name: &str) -> String {
+    env::var(name).unwrap_or_else(|_| "<unset>".to_string())
+}
+
 fn run() -> Result<(), Box<dyn Error>> {
     let config = parse_args(env::args().skip(1))?;
     let stdin_is_terminal = stdin_is_terminal();
@@ -1033,6 +1058,15 @@ fn run() -> Result<(), Box<dyn Error>> {
             stdin_is_terminal,
             action,
             stdout_output_device()
+        );
+        eprintln!(
+            "pbi debug: terminal_protocol={:?} {}={} TERM={} TERM_PROGRAM={} KITTY_WINDOW_ID={}",
+            terminal_image_protocol(),
+            PBI_IMAGE_PROTOCOL_ENV,
+            env_debug_value(PBI_IMAGE_PROTOCOL_ENV),
+            env_debug_value("TERM"),
+            env_debug_value("TERM_PROGRAM"),
+            env_debug_value("KITTY_WINDOW_ID")
         );
     }
 
@@ -1084,7 +1118,7 @@ mod tests {
     #[test]
     fn uses_kitty_when_kitty_window_is_present() {
         assert_eq!(
-            terminal_image_protocol_from_env(Some("1"), Some("xterm-256color"), None),
+            terminal_image_protocol_from_env(None, Some("1"), Some("xterm-256color"), None),
             Some(TerminalImageProtocol::Kitty)
         );
     }
@@ -1092,7 +1126,41 @@ mod tests {
     #[test]
     fn uses_sixel_for_iterm_when_kitty_window_env_leaks() {
         assert_eq!(
-            terminal_image_protocol_from_env(Some("1"), Some("xterm-256color"), Some("iTerm.app")),
+            terminal_image_protocol_from_env(
+                None,
+                Some("1"),
+                Some("xterm-256color"),
+                Some("iTerm.app")
+            ),
+            Some(TerminalImageProtocol::Sixel)
+        );
+    }
+
+    #[test]
+    fn supports_sixel_protocol_override() {
+        assert_eq!(
+            terminal_image_protocol_from_env(Some("sixel"), None, Some("xterm-256color"), None),
+            Some(TerminalImageProtocol::Sixel)
+        );
+    }
+
+    #[test]
+    fn supports_kitty_protocol_override() {
+        assert_eq!(
+            terminal_image_protocol_from_env(Some("kitty"), None, Some("xterm-sixel"), None),
+            Some(TerminalImageProtocol::Kitty)
+        );
+    }
+
+    #[test]
+    fn ignores_unknown_protocol_override() {
+        assert_eq!(
+            terminal_image_protocol_from_env(
+                Some("unknown"),
+                None,
+                Some("xterm-256color"),
+                Some("iTerm.app")
+            ),
             Some(TerminalImageProtocol::Sixel)
         );
     }
@@ -1100,7 +1168,7 @@ mod tests {
     #[test]
     fn uses_kitty_for_known_kitty_protocol_terminals() {
         assert_eq!(
-            terminal_image_protocol_from_env(None, None, Some("ghostty")),
+            terminal_image_protocol_from_env(None, None, None, Some("ghostty")),
             Some(TerminalImageProtocol::Kitty)
         );
     }
@@ -1108,7 +1176,7 @@ mod tests {
     #[test]
     fn uses_sixel_for_iterm() {
         assert_eq!(
-            terminal_image_protocol_from_env(None, Some("xterm-256color"), Some("iTerm.app")),
+            terminal_image_protocol_from_env(None, None, Some("xterm-256color"), Some("iTerm.app")),
             Some(TerminalImageProtocol::Sixel)
         );
     }
@@ -1116,7 +1184,7 @@ mod tests {
     #[test]
     fn uses_sixel_for_sixel_term() {
         assert_eq!(
-            terminal_image_protocol_from_env(None, Some("xterm-sixel"), None),
+            terminal_image_protocol_from_env(None, None, Some("xterm-sixel"), None),
             Some(TerminalImageProtocol::Sixel)
         );
     }
@@ -1124,7 +1192,12 @@ mod tests {
     #[test]
     fn ignores_unknown_terminal_protocols() {
         assert_eq!(
-            terminal_image_protocol_from_env(None, Some("xterm-256color"), Some("Apple_Terminal")),
+            terminal_image_protocol_from_env(
+                None,
+                None,
+                Some("xterm-256color"),
+                Some("Apple_Terminal")
+            ),
             None
         );
     }

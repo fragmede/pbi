@@ -103,3 +103,25 @@
 - `cargo test --locked` passed with 19 unit tests.
 - `cargo install --path . --root /tmp/pbi-local-0.1.1 --force --locked` passed.
 - `cargo publish --dry-run --allow-dirty` passed for `pbi v0.1.1`.
+
+## Follow-up: Installed 0.1.1 Still Misses Sixel
+
+- [x] Confirm crates.io advertises `pbi v0.1.1` and inspect installed binary lookup.
+- [x] Reproduce the installed binary's terminal protocol decision.
+- [x] Add runtime diagnostics for terminal protocol detection.
+- [x] Verify the published-install path.
+- [x] Commit the scoped fix.
+
+### Review
+
+- With `TERM=xterm-256color` and no `TERM_PROGRAM` or `KITTY_WINDOW_ID`, `pbi --debug` reproduced `terminal_protocol=None`.
+- Added `PBI_IMAGE_PROTOCOL=sixel` and `PBI_IMAGE_PROTOCOL=kitty` overrides.
+- `--debug` now prints `terminal_protocol`, `PBI_IMAGE_PROTOCOL`, `TERM`, `TERM_PROGRAM`, and `KITTY_WINDOW_ID`.
+- The unsupported-terminal message now points at `PBI_IMAGE_PROTOCOL=sixel`.
+- Bumped the crate to `0.1.2` for the next crates.io publish.
+- `cargo fmt -- --check` passed.
+- `cargo check --locked` passed.
+- `cargo test --locked` passed with 22 unit tests.
+- `cargo install --path . --root /tmp/pbi-local-0.1.2 --force --locked` passed.
+- `cargo publish --dry-run --allow-dirty` passed for `pbi v0.1.2`.
+- Runtime PTY verification showed `terminal_protocol=Some(Sixel)` with `PBI_IMAGE_PROTOCOL=sixel` despite `TERM=xterm-256color`.
