@@ -140,3 +140,15 @@
 - `cargo check --locked` passed.
 - `cargo test --locked` passed with 24 unit tests.
 - `cargo run --locked -- --help` printed usage text and exited successfully.
+
+## Follow-up: Bash Command Hash Cache
+
+- [x] Confirm the published `pbi v0.1.2` tarball contains `PBI_IMAGE_PROTOCOL`.
+- [x] Confirm a clean `cargo install pbi --version 0.1.2 --locked` contains the override strings.
+- [x] Identify stale Bash command hashing as the reason the terminal still ran old behavior.
+- [x] Document `hash -r` as the fix.
+
+### Review
+
+- The installed binary and crates.io tarball were current.
+- Running `hash -r` in the affected Bash session cleared the stale command lookup.
