@@ -39,3 +39,10 @@
 - [x] Declare the legacy `cargo-clippy` cfg value expected by `objc` macros.
 - [x] Verify warning-clean cargo checks and run.
 - [x] Commit the scoped warning cleanup.
+
+## Follow-up: SVG Clipboard Support
+
+- [x] Add SVG pasteboard read/write support.
+- [x] Add SVG detection tests.
+- [x] Verify checks/tests.
+- [x] Commit the scoped SVG support.

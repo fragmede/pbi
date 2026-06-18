@@ -15,6 +15,7 @@ use std::fmt;
 
 const TEXT_PASTEBOARD_TYPES: [&str; 2] = ["public.utf8-plain-text", "NSStringPboardType"];
 const TIFF_PASTEBOARD_TYPES: [&str; 2] = ["public.tiff", "NSTIFFPboardType"];
+const SVG_PASTEBOARD_TYPES: [&str; 2] = ["public.svg-image", "image/svg+xml"];
 
 #[repr(C)]
 struct Stat {
@@ -75,6 +76,7 @@ enum ClipboardAction {
 enum ClipboardContent {
     Text(Vec<u8>),
     Image(Vec<u8>),
+    Svg(Vec<u8>),
     Unknown,
 }
 
@@ -201,7 +203,19 @@ fn pasteboard_data_for_types(
 fn get_clipboard_content() -> Result<ClipboardContent, Box<dyn Error>> {
     let pb = general_pasteboard()?;
 
+    if let Some(svg) = pasteboard_data_for_types(pb, &SVG_PASTEBOARD_TYPES)? {
+        return Ok(ClipboardContent::Svg(svg));
+    }
+
+    if let Some(svg) = pasteboard_string_for_types(pb, &SVG_PASTEBOARD_TYPES)? {
+        return Ok(ClipboardContent::Svg(svg));
+    }
+
     if let Some(text) = pasteboard_string_for_types(pb, &TEXT_PASTEBOARD_TYPES)? {
+        if is_svg_content(&text) {
+            return Ok(ClipboardContent::Svg(text));
+        }
+
         return Ok(ClipboardContent::Text(text));
     }
 
@@ -256,6 +270,35 @@ fn set_pasteboard_tiff(tiff_data: Vec<u8>) -> Result<(), Box<dyn Error>> {
     }
 }
 
+fn set_pasteboard_svg(svg_data: Vec<u8>) -> Result<(), Box<dyn Error>> {
+    let pb = general_pasteboard()?;
+    let svg_text = std::str::from_utf8(&svg_data)?;
+    let text = NSString::from_str(svg_text);
+    let data = NSData::from_vec(svg_data);
+    let _: isize = unsafe { msg_send![pb, clearContents] };
+
+    let mut svg_written = false;
+    for pasteboard_type in &SVG_PASTEBOARD_TYPES {
+        let ns_type = NSString::from_str(pasteboard_type);
+        let success: BOOL = unsafe { msg_send![pb, setData: &*data forType: &*ns_type] };
+        svg_written |= success == YES;
+    }
+
+    for pasteboard_type in &TEXT_PASTEBOARD_TYPES {
+        let ns_type = NSString::from_str(pasteboard_type);
+        let _: BOOL = unsafe { msg_send![pb, setString: &*text forType: &*ns_type] };
+    }
+
+    if svg_written {
+        Ok(())
+    } else {
+        Err(Box::new(CocoaClassError::new(
+            "NSPasteboard",
+            "failed to write SVG",
+        )))
+    }
+}
+
 fn transform_content(extension: &str, content: &[u8]) -> Option<Vec<u8>> {
     let formats = [
         (vec!["png"], ImageFormat::Png),
@@ -290,6 +333,49 @@ fn tiff_from_image_data(content: &[u8]) -> Option<Vec<u8>> {
     } else {
         None
     }
+}
+
+fn starts_with_ignore_ascii_case(text: &str, prefix: &str) -> bool {
+    text.get(..prefix.len())
+        .is_some_and(|head| head.eq_ignore_ascii_case(prefix))
+}
+
+fn strip_svg_preamble(mut text: &str) -> Option<&str> {
+    text = text.trim_start_matches('\u{feff}').trim_start();
+
+    loop {
+        if starts_with_ignore_ascii_case(text, "<?xml") {
+            let end = text.find("?>")?;
+            text = text[end + 2..].trim_start();
+        } else if text.starts_with("<!--") {
+            let end = text.find("-->")?;
+            text = text[end + 3..].trim_start();
+        } else if starts_with_ignore_ascii_case(text, "<!doctype") {
+            let end = text.find('>')?;
+            text = text[end + 1..].trim_start();
+        } else {
+            return Some(text);
+        }
+    }
+}
+
+fn is_svg_open_tag(text: &str) -> bool {
+    if !starts_with_ignore_ascii_case(text, "<svg") {
+        return false;
+    }
+
+    matches!(
+        text.as_bytes().get(4),
+        Some(b'>') | Some(b' ') | Some(b'\t') | Some(b'\n') | Some(b'\r')
+    )
+}
+
+fn is_svg_content(content: &[u8]) -> bool {
+    let Ok(text) = std::str::from_utf8(content) else {
+        return false;
+    };
+
+    strip_svg_preamble(text).is_some_and(is_svg_open_tag)
 }
 
 fn term_supports_kitty() -> bool {
@@ -378,6 +464,10 @@ fn pbcopy() -> Result<(), Box<dyn Error>> {
     let mut content = Vec::new();
     io::stdin().read_to_end(&mut content)?;
 
+    if is_svg_content(&content) {
+        return set_pasteboard_svg(content);
+    }
+
     if let Some(tiff_data) = tiff_from_image_data(&content) {
         return set_pasteboard_tiff(tiff_data);
     }
@@ -396,6 +486,9 @@ fn pbpaste() -> Result<(), Box<dyn Error>> {
     match get_clipboard_content()? {
         ClipboardContent::Text(text) => {
             io::stdout().write_all(&text)?;
+        }
+        ClipboardContent::Svg(svg) => {
+            io::stdout().write_all(&svg)?;
         }
         ClipboardContent::Image(image_data) => match stdout_output_device() {
             "file" => {
@@ -441,7 +534,7 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{action_for_stdin, ClipboardAction};
+    use super::{action_for_stdin, is_svg_content, ClipboardAction};
 
     #[test]
     fn copy_when_stdin_is_not_terminal() {
@@ -451,5 +544,32 @@ mod tests {
     #[test]
     fn paste_when_stdin_is_terminal() {
         assert_eq!(action_for_stdin(true), ClipboardAction::Paste);
+    }
+
+    #[test]
+    fn detects_plain_svg_document() {
+        assert!(is_svg_content(
+            br#"<svg xmlns="http://www.w3.org/2000/svg"></svg>"#
+        ));
+    }
+
+    #[test]
+    fn detects_svg_with_xml_preamble() {
+        assert!(is_svg_content(
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+            <!-- generated -->
+            <!DOCTYPE svg>
+            <svg viewBox="0 0 10 10"></svg>"#
+        ));
+    }
+
+    #[test]
+    fn rejects_text_that_mentions_svg() {
+        assert!(!is_svg_content(b"This sentence talks about <svg> tags."));
+    }
+
+    #[test]
+    fn rejects_non_utf8_data_as_svg() {
+        assert!(!is_svg_content(&[0xff, 0xd8, 0xff, 0x00]));
     }
 }
