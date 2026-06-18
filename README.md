@@ -4,7 +4,11 @@
   <img src="assets/pbi-icon.svg" alt="pbi clipboard icon" width="156">
 </p>
 
-## What
+## What is this?
+`pbi` copies stdin to the pasteboard when stdin is piped or redirected. When
+stdin is a terminal, it pastes the current pasteboard content.
+
+### Advanced 
 An image-aware version of `pbcopy` and `pbpaste` for macOS.
 
 Pbcopy/paste gets/sets information on the clipboard from the terminal.
@@ -14,7 +18,7 @@ click, copy image, and then paste that contents in the terminal.
 With pbi, you can.
 
 While we're at it, pbcopy and pbpaste can be combined into one utility that
-detects read or write.
+detects if you're reading or writing to it.
 
 ## Installing
 
@@ -28,7 +32,7 @@ From a checkout:
 
 ## Usage
 
-Right click on an image, and then you can do:
+Right click on an image in your web browser, copy image, and then your terminal, do:
 
     pbi > nyan.jpg
 
@@ -46,13 +50,10 @@ Also you can do
     
     if you prefer
 
-We live in the future: terminals with Kitty graphics protocol support and
-iTerm2 with Sixel support can also do plain
+If you use a modern terminal that has Kitty graphics protocol or sixel support,
+with an image on your paste board you can do:
 
     pbi
 
-and it'll display the image directly in the terminal.
+and the image will display directly in your terminal.
 
-
-`pbi` copies stdin to the pasteboard when stdin is piped or redirected. When
-stdin is a terminal, it pastes the current pasteboard content.
