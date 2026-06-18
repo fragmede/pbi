@@ -71,3 +71,17 @@
 - [x] Add focused parser tests.
 - [x] Verify checks/tests and live clipboard behavior.
 - [x] Commit the scoped debug and HTML-SVG fix.
+
+## Follow-up: Publish Dry Run Yanked Dependencies
+
+- [x] Trace why `bytemuck` and `rgb` are locked to yanked versions.
+- [x] Update dependency constraints or lockfile with the smallest safe change.
+- [x] Verify checks/tests and `cargo publish --dry-run`.
+- [x] Document results and commit the scoped dependency fix.
+
+### Review
+
+- `cargo fmt -- --check` passed.
+- `cargo check` passed.
+- `cargo test` passed with 18 unit tests.
+- `cargo publish --dry-run --allow-dirty` passed before commit and no longer warned about yanked `bytemuck` or `rgb` versions.
