@@ -24,11 +24,12 @@ or
 
     pbi > nyan.png
 
-We live in the future and ghostty has kitty support, so you can also do
+We live in the future: terminals with Kitty graphics protocol support and
+iTerm2 with Sixel support can also do plain
 
     pbi
 
-and it'll display the image in a supported TERM.
+and it'll display the image directly in the terminal.
 
 
 `pbi` copies stdin to the pasteboard when stdin is piped or redirected. When

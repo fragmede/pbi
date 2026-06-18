@@ -1,6 +1,7 @@
 use std::env;
 use std::error::Error;
 use std::ffi::{CStr, CString};
+use std::fmt::{self, Write as FmtWrite};
 use std::io::{self, Cursor, Read, Write};
 use std::os::unix::io::AsRawFd;
 
@@ -11,11 +12,14 @@ use objc::runtime::{Class, Object, BOOL, YES};
 use objc::{msg_send, sel, sel_impl};
 use objc_foundation::{INSData, INSString, NSData, NSString};
 use objc_id::Id;
-use std::fmt;
 
 const TEXT_PASTEBOARD_TYPES: [&str; 2] = ["public.utf8-plain-text", "NSStringPboardType"];
 const TIFF_PASTEBOARD_TYPES: [&str; 2] = ["public.tiff", "NSTIFFPboardType"];
 const SVG_PASTEBOARD_TYPES: [&str; 2] = ["public.svg-image", "image/svg+xml"];
+const SIXEL_COLOR_LEVELS: usize = 6;
+const SIXEL_PALETTE_SIZE: usize = SIXEL_COLOR_LEVELS * SIXEL_COLOR_LEVELS * SIXEL_COLOR_LEVELS;
+const SIXEL_TRANSPARENT: u8 = u8::MAX;
+const SIXEL_ALPHA_THRESHOLD: u8 = 128;
 
 #[repr(C)]
 struct Stat {
@@ -78,6 +82,12 @@ enum ClipboardContent {
     Image(Vec<u8>),
     Svg(Vec<u8>),
     Unknown,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+enum TerminalImageProtocol {
+    Kitty,
+    Sixel,
 }
 
 fn action_for_stdin(stdin_is_terminal: bool) -> ClipboardAction {
@@ -378,46 +388,196 @@ fn is_svg_content(content: &[u8]) -> bool {
     strip_svg_preamble(text).is_some_and(is_svg_open_tag)
 }
 
-fn term_supports_kitty() -> bool {
-    // Check for Kitty terminal
-    if env::var("KITTY_WINDOW_ID").is_ok() {
-        return true;
-    }
-
-    // Check TERM variable for kitty
-    if let Ok(term) = env::var("TERM") {
-        if term.contains("kitty") {
-            return true;
-        }
-    }
-
-    // Check TERM_PROGRAM for known Kitty graphics protocol supporters
-    if let Ok(term_program) = env::var("TERM_PROGRAM") {
-        // WezTerm, Ghostty, and Kitty support Kitty graphics protocol
-        let kitty_supporters = ["WezTerm", "ghostty", "kitty"];
-        for supporter in &kitty_supporters {
-            if term_program
-                .to_lowercase()
-                .contains(&supporter.to_lowercase())
-            {
-                return true;
-            }
-        }
-    }
-
-    false
+fn contains_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
+    haystack.to_lowercase().contains(&needle.to_lowercase())
 }
 
-fn write_kitty_graphics(image_data: &[u8]) -> io::Result<()> {
-    // Convert TIFF to PNG first
-    let img = image::load_from_memory_with_format(image_data, ImageFormat::Tiff)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+fn terminal_image_protocol_from_env(
+    kitty_window_id: Option<&str>,
+    term: Option<&str>,
+    term_program: Option<&str>,
+) -> Option<TerminalImageProtocol> {
+    if kitty_window_id.is_some()
+        || term.is_some_and(|term| contains_ignore_ascii_case(term, "kitty"))
+        || term_program.is_some_and(|term_program| {
+            ["WezTerm", "ghostty", "kitty"]
+                .iter()
+                .any(|supporter| contains_ignore_ascii_case(term_program, supporter))
+        })
+    {
+        return Some(TerminalImageProtocol::Kitty);
+    }
 
+    if term.is_some_and(|term| contains_ignore_ascii_case(term, "sixel"))
+        || term_program
+            .is_some_and(|term_program| contains_ignore_ascii_case(term_program, "iterm"))
+    {
+        return Some(TerminalImageProtocol::Sixel);
+    }
+
+    None
+}
+
+fn terminal_image_protocol() -> Option<TerminalImageProtocol> {
+    let kitty_window_id = env::var("KITTY_WINDOW_ID").ok();
+    let term = env::var("TERM").ok();
+    let term_program = env::var("TERM_PROGRAM").ok();
+
+    terminal_image_protocol_from_env(
+        kitty_window_id.as_deref(),
+        term.as_deref(),
+        term_program.as_deref(),
+    )
+}
+
+fn tiff_image(image_data: &[u8]) -> io::Result<image::DynamicImage> {
+    image::load_from_memory_with_format(image_data, ImageFormat::Tiff)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+}
+
+fn png_from_tiff(image_data: &[u8]) -> io::Result<Vec<u8>> {
+    let img = tiff_image(image_data)?;
     let mut png_data = Cursor::new(Vec::new());
     img.write_to(&mut png_data, ImageFormat::Png)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    Ok(png_data.into_inner())
+}
 
-    let png_bytes = png_data.into_inner();
+fn quantize_sixel_component(value: u8) -> u8 {
+    ((value as u16 * (SIXEL_COLOR_LEVELS as u16 - 1) + 127) / 255) as u8
+}
+
+fn sixel_palette_index(red: u8, green: u8, blue: u8) -> u8 {
+    let red = quantize_sixel_component(red);
+    let green = quantize_sixel_component(green);
+    let blue = quantize_sixel_component(blue);
+
+    red * 36 + green * 6 + blue
+}
+
+fn sixel_palette_color(index: usize) -> (usize, usize, usize) {
+    let red = index / 36;
+    let green = (index / 6) % 6;
+    let blue = index % 6;
+
+    (red * 20, green * 20, blue * 20)
+}
+
+fn push_sixel_mask_run(output: &mut String, mask: u8, count: usize) {
+    let sixel_char = (mask + 63) as char;
+
+    if count > 3 {
+        write!(output, "!{}{}", count, sixel_char).unwrap();
+    } else {
+        for _ in 0..count {
+            output.push(sixel_char);
+        }
+    }
+}
+
+fn push_sixel_masks(output: &mut String, masks: &[u8]) {
+    if masks.is_empty() {
+        return;
+    }
+
+    let mut current = masks[0];
+    let mut count = 1;
+
+    for &mask in &masks[1..] {
+        if mask == current {
+            count += 1;
+        } else {
+            push_sixel_mask_run(output, current, count);
+            current = mask;
+            count = 1;
+        }
+    }
+
+    push_sixel_mask_run(output, current, count);
+}
+
+fn encode_sixel_image(rgba: &image::RgbaImage) -> String {
+    let (width, height) = rgba.dimensions();
+    let width = width as usize;
+    let height = height as usize;
+    let pixels = rgba.as_raw();
+    let mut indexed_pixels = vec![SIXEL_TRANSPARENT; width * height];
+    let mut used_colors = [false; SIXEL_PALETTE_SIZE];
+
+    for y in 0..height {
+        for x in 0..width {
+            let pixel_index = (y * width + x) * 4;
+            let alpha = pixels[pixel_index + 3];
+
+            if alpha < SIXEL_ALPHA_THRESHOLD {
+                continue;
+            }
+
+            let palette_index = sixel_palette_index(
+                pixels[pixel_index],
+                pixels[pixel_index + 1],
+                pixels[pixel_index + 2],
+            );
+            indexed_pixels[y * width + x] = palette_index;
+            used_colors[palette_index as usize] = true;
+        }
+    }
+
+    let mut output = String::new();
+    write!(output, "\x1bPq\"1;1;{};{}", width, height).unwrap();
+
+    for (index, is_used) in used_colors.iter().enumerate() {
+        if *is_used {
+            let (red, green, blue) = sixel_palette_color(index);
+            write!(output, "#{};2;{};{};{}", index, red, green, blue).unwrap();
+        }
+    }
+
+    for band_start in (0..height).step_by(6) {
+        let mut band_masks = vec![vec![0u8; width]; SIXEL_PALETTE_SIZE];
+        let mut band_colors = [false; SIXEL_PALETTE_SIZE];
+
+        for y_offset in 0..6 {
+            let y = band_start + y_offset;
+            if y >= height {
+                break;
+            }
+
+            for x in 0..width {
+                let palette_index = indexed_pixels[y * width + x];
+                if palette_index == SIXEL_TRANSPARENT {
+                    continue;
+                }
+
+                band_masks[palette_index as usize][x] |= 1 << y_offset;
+                band_colors[palette_index as usize] = true;
+            }
+        }
+
+        let mut wrote_color = false;
+        for (index, is_used) in band_colors.iter().enumerate() {
+            if !*is_used {
+                continue;
+            }
+
+            if wrote_color {
+                output.push('$');
+            }
+
+            write!(output, "#{}", index).unwrap();
+            push_sixel_masks(&mut output, &band_masks[index]);
+            wrote_color = true;
+        }
+
+        output.push('-');
+    }
+
+    output.push_str("\x1b\\");
+    output
+}
+
+fn write_kitty_graphics(image_data: &[u8]) -> io::Result<()> {
+    let png_bytes = png_from_tiff(image_data)?;
     let encoded = BASE64.encode(&png_bytes);
 
     let mut stdout = io::stdout();
@@ -454,6 +614,18 @@ fn write_kitty_graphics(image_data: &[u8]) -> io::Result<()> {
     }
 
     // Add newline after image
+    writeln!(stdout)?;
+    stdout.flush()?;
+
+    Ok(())
+}
+
+fn write_sixel_graphics(image_data: &[u8]) -> io::Result<()> {
+    let rgba = tiff_image(image_data)?.to_rgba8();
+    let sixel = encode_sixel_image(&rgba);
+
+    let mut stdout = io::stdout();
+    write!(stdout, "{}", sixel)?;
     writeln!(stdout)?;
     stdout.flush()?;
 
@@ -498,14 +670,14 @@ fn pbpaste() -> Result<(), Box<dyn Error>> {
                     }
                 }
             }
-            "terminal" => {
-                if term_supports_kitty() {
-                    write_kitty_graphics(&image_data)?;
-                } else {
-                    eprintln!("Terminal does not support Kitty graphics protocol.");
-                    eprintln!("Supported terminals: Kitty, WezTerm, Ghostty");
+            "terminal" => match terminal_image_protocol() {
+                Some(TerminalImageProtocol::Kitty) => write_kitty_graphics(&image_data)?,
+                Some(TerminalImageProtocol::Sixel) => write_sixel_graphics(&image_data)?,
+                None => {
+                    eprintln!("Terminal does not support Kitty graphics or Sixel output.");
+                    eprintln!("Supported terminals: Kitty, WezTerm, Ghostty, iTerm2");
                 }
-            }
+            },
             _ => {
                 eprintln!("Unsupported clipboard content");
             }
@@ -534,7 +706,11 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{action_for_stdin, is_svg_content, ClipboardAction};
+    use super::{
+        action_for_stdin, encode_sixel_image, is_svg_content, terminal_image_protocol_from_env,
+        ClipboardAction, TerminalImageProtocol,
+    };
+    use image::{Rgba, RgbaImage};
 
     #[test]
     fn copy_when_stdin_is_not_terminal() {
@@ -544,6 +720,73 @@ mod tests {
     #[test]
     fn paste_when_stdin_is_terminal() {
         assert_eq!(action_for_stdin(true), ClipboardAction::Paste);
+    }
+
+    #[test]
+    fn uses_kitty_when_kitty_window_is_present() {
+        assert_eq!(
+            terminal_image_protocol_from_env(Some("1"), Some("xterm-256color"), Some("iTerm.app")),
+            Some(TerminalImageProtocol::Kitty)
+        );
+    }
+
+    #[test]
+    fn uses_kitty_for_known_kitty_protocol_terminals() {
+        assert_eq!(
+            terminal_image_protocol_from_env(None, None, Some("ghostty")),
+            Some(TerminalImageProtocol::Kitty)
+        );
+    }
+
+    #[test]
+    fn uses_sixel_for_iterm() {
+        assert_eq!(
+            terminal_image_protocol_from_env(None, Some("xterm-256color"), Some("iTerm.app")),
+            Some(TerminalImageProtocol::Sixel)
+        );
+    }
+
+    #[test]
+    fn uses_sixel_for_sixel_term() {
+        assert_eq!(
+            terminal_image_protocol_from_env(None, Some("xterm-sixel"), None),
+            Some(TerminalImageProtocol::Sixel)
+        );
+    }
+
+    #[test]
+    fn ignores_unknown_terminal_protocols() {
+        assert_eq!(
+            terminal_image_protocol_from_env(None, Some("xterm-256color"), Some("Apple_Terminal")),
+            None
+        );
+    }
+
+    #[test]
+    fn encodes_single_red_pixel_as_sixel() {
+        let image = RgbaImage::from_pixel(1, 1, Rgba([255, 0, 0, 255]));
+        let sixel = encode_sixel_image(&image);
+
+        assert!(sixel.starts_with("\x1bPq\"1;1;1;1#180;2;100;0;0"));
+        assert!(sixel.contains("#180@"));
+        assert!(sixel.ends_with("-\x1b\\"));
+    }
+
+    #[test]
+    fn skips_transparent_pixels_in_sixel_output() {
+        let image = RgbaImage::from_pixel(1, 1, Rgba([255, 0, 0, 0]));
+        let sixel = encode_sixel_image(&image);
+
+        assert!(!sixel.contains(";2;"));
+        assert!(!sixel.contains("#180"));
+    }
+
+    #[test]
+    fn compresses_repeated_sixel_masks() {
+        let image = RgbaImage::from_pixel(4, 1, Rgba([255, 0, 0, 255]));
+        let sixel = encode_sixel_image(&image);
+
+        assert!(sixel.contains("#180!4@"));
     }
 
     #[test]

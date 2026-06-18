@@ -40,6 +40,22 @@
 - [x] Verify warning-clean cargo checks and run.
 - [x] Commit the scoped warning cleanup.
 
+## Follow-up: Sixel Terminal Images
+
+- [x] Preserve existing copy/paste and file-output behavior while adding terminal protocol selection.
+- [x] Add a Sixel output path for iTerm-compatible terminals.
+- [x] Share image conversion logic between terminal protocols.
+- [x] Add focused tests for terminal protocol detection.
+- [x] Update README terminal display documentation.
+- [x] Run formatting, checks, and tests.
+- [x] Commit the scoped Sixel support changes.
+
+### Review
+
+- `cargo fmt -- --check` passed.
+- `cargo check` passed.
+- `cargo test` passed with 14 unit tests.
+
 ## Follow-up: SVG Clipboard Support
 
 - [x] Add SVG pasteboard read/write support.
