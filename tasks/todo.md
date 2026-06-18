@@ -31,3 +31,11 @@
 - [x] Add the icon to the README.
 - [x] Verify the asset and README reference.
 - [x] Commit the scoped icon update.
+
+## Follow-up: Cargo Run Warnings
+
+- [x] Reproduce/check the cargo warning path without exposing pasteboard output.
+- [x] Remove the deprecated `Error::description` override.
+- [x] Declare the legacy `cargo-clippy` cfg value expected by `objc` macros.
+- [x] Verify warning-clean cargo checks and run.
+- [x] Commit the scoped warning cleanup.

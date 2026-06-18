@@ -64,11 +64,7 @@ impl fmt::Display for CocoaClassError {
     }
 }
 
-impl Error for CocoaClassError {
-    fn description(&self) -> &str {
-        &self.details
-    }
-}
+impl Error for CocoaClassError {}
 
 #[derive(Debug, Eq, PartialEq)]
 enum ClipboardAction {

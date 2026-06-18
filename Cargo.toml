@@ -7,6 +7,9 @@ edition = "2021"
 name = "pbi"
 path = "src/main.rs"
 
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("cargo-clippy"))'] }
+
 [dependencies]
 base64 = "0.22"
 image = "0.25.1"
