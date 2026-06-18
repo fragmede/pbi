@@ -23,6 +23,19 @@ const SIXEL_PALETTE_SIZE: usize = SIXEL_COLOR_LEVELS * SIXEL_COLOR_LEVELS * SIXE
 const SIXEL_TRANSPARENT: u8 = u8::MAX;
 const SIXEL_ALPHA_THRESHOLD: u8 = 128;
 const PBI_IMAGE_PROTOCOL_ENV: &str = "PBI_IMAGE_PROTOCOL";
+const HELP_TEXT: &str = concat!(
+    "pbi ",
+    env!("CARGO_PKG_VERSION"),
+    "\n\n",
+    "Usage: pbi [OPTIONS]\n\n",
+    "Copies stdin to the macOS pasteboard when stdin is piped or redirected.\n",
+    "When stdin is a terminal, pastes the current pasteboard content.\n\n",
+    "Options:\n",
+    "    --debug       Print clipboard and terminal diagnostics to stderr\n",
+    "    -h, --help    Print this help message\n\n",
+    "Environment:\n",
+    "    PBI_IMAGE_PROTOCOL=kitty|sixel    Force terminal image output protocol\n",
+);
 
 #[repr(C)]
 struct Stat {
@@ -90,6 +103,7 @@ enum ClipboardContent {
 #[derive(Debug, Default, Eq, PartialEq)]
 struct Config {
     debug: bool,
+    help: bool,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -107,16 +121,23 @@ where
     for arg in args {
         match arg.as_str() {
             "--debug" => config.debug = true,
+            "-h" | "--help" => config.help = true,
             _ => {
                 return Err(Box::new(io::Error::new(
                     io::ErrorKind::InvalidInput,
-                    format!("unsupported argument: {arg}"),
+                    format!("unsupported argument: {arg}\nTry 'pbi --help' for usage."),
                 )));
             }
         }
     }
 
     Ok(config)
+}
+
+fn print_help() -> io::Result<()> {
+    let mut stdout = io::stdout();
+    stdout.write_all(HELP_TEXT.as_bytes())?;
+    stdout.flush()
 }
 
 fn action_for_stdin(stdin_is_terminal: bool) -> ClipboardAction {
@@ -1049,6 +1070,12 @@ fn env_debug_value(name: &str) -> String {
 
 fn run() -> Result<(), Box<dyn Error>> {
     let config = parse_args(env::args().skip(1))?;
+
+    if config.help {
+        print_help()?;
+        return Ok(());
+    }
+
     let stdin_is_terminal = stdin_is_terminal();
     let action = action_for_stdin(stdin_is_terminal);
 
@@ -1106,7 +1133,32 @@ mod tests {
     fn parses_debug_flag() {
         assert_eq!(
             parse_args(["--debug".to_string()]).unwrap(),
-            Config { debug: true }
+            Config {
+                debug: true,
+                ..Config::default()
+            }
+        );
+    }
+
+    #[test]
+    fn parses_help_flag() {
+        assert_eq!(
+            parse_args(["--help".to_string()]).unwrap(),
+            Config {
+                help: true,
+                ..Config::default()
+            }
+        );
+    }
+
+    #[test]
+    fn parses_short_help_flag() {
+        assert_eq!(
+            parse_args(["-h".to_string()]).unwrap(),
+            Config {
+                help: true,
+                ..Config::default()
+            }
         );
     }
 

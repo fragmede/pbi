@@ -32,6 +32,15 @@ From a checkout:
 
 ## Usage
 
+Show command help:
+
+    pbi --help
+
+Options:
+
+- `--debug` prints clipboard and terminal diagnostics to stderr.
+- `-h`, `--help` prints usage and exits without clipboard access.
+
 Right click on an image in your web browser, copy image, and then your terminal, do:
 
     pbi > nyan.jpg

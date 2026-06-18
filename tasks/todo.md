@@ -125,3 +125,18 @@
 - `cargo install --path . --root /tmp/pbi-local-0.1.2 --force --locked` passed.
 - `cargo publish --dry-run --allow-dirty` passed for `pbi v0.1.2`.
 - Runtime PTY verification showed `terminal_protocol=Some(Sixel)` with `PBI_IMAGE_PROTOCOL=sixel` despite `TERM=xterm-256color`.
+
+## Follow-up: Help Flag
+
+- [x] Add a `--help`/`-h` code path that exits before clipboard access.
+- [x] Add focused argument parser tests.
+- [x] Update README usage documentation.
+- [x] Verify formatting, checks, and tests.
+- [x] Commit the scoped help flag changes.
+
+### Review
+
+- `cargo fmt -- --check` passed.
+- `cargo check --locked` passed.
+- `cargo test --locked` passed with 24 unit tests.
+- `cargo run --locked -- --help` printed usage text and exited successfully.
