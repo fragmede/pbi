@@ -3,8 +3,9 @@
 </p>
 
 # pbi
+[assets/pbi-icon.svg]
 
-Image-aware version of `pbcopy` and `pbpaste` for macOS.
+An image-aware version of `pbcopy` and `pbpaste` for macOS.
 
 Pbcopy/paste gets/sets information on the clipboard from the terminal.
 They're pretty handy! They don't handle images though. So you can't right
