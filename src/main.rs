@@ -712,14 +712,11 @@ fn terminal_image_protocol_from_env(
     term: Option<&str>,
     term_program: Option<&str>,
 ) -> Option<TerminalImageProtocol> {
-    if kitty_window_id.is_some()
-        || term.is_some_and(|term| contains_ignore_ascii_case(term, "kitty"))
-        || term_program.is_some_and(|term_program| {
-            ["WezTerm", "ghostty", "kitty"]
-                .iter()
-                .any(|supporter| contains_ignore_ascii_case(term_program, supporter))
-        })
-    {
+    if term_program.is_some_and(|term_program| {
+        ["WezTerm", "ghostty", "kitty"]
+            .iter()
+            .any(|supporter| contains_ignore_ascii_case(term_program, supporter))
+    }) {
         return Some(TerminalImageProtocol::Kitty);
     }
 
@@ -728,6 +725,12 @@ fn terminal_image_protocol_from_env(
             .is_some_and(|term_program| contains_ignore_ascii_case(term_program, "iterm"))
     {
         return Some(TerminalImageProtocol::Sixel);
+    }
+
+    if kitty_window_id.is_some()
+        || term.is_some_and(|term| contains_ignore_ascii_case(term, "kitty"))
+    {
+        return Some(TerminalImageProtocol::Kitty);
     }
 
     None
@@ -1081,8 +1084,16 @@ mod tests {
     #[test]
     fn uses_kitty_when_kitty_window_is_present() {
         assert_eq!(
-            terminal_image_protocol_from_env(Some("1"), Some("xterm-256color"), Some("iTerm.app")),
+            terminal_image_protocol_from_env(Some("1"), Some("xterm-256color"), None),
             Some(TerminalImageProtocol::Kitty)
+        );
+    }
+
+    #[test]
+    fn uses_sixel_for_iterm_when_kitty_window_env_leaks() {
+        assert_eq!(
+            terminal_image_protocol_from_env(Some("1"), Some("xterm-256color"), Some("iTerm.app")),
+            Some(TerminalImageProtocol::Sixel)
         );
     }
 

@@ -85,3 +85,21 @@
 - `cargo check` passed.
 - `cargo test` passed with 18 unit tests.
 - `cargo publish --dry-run --allow-dirty` passed before commit and no longer warned about yanked `bytemuck` or `rgb` versions.
+
+## Follow-up: crates.io iTerm Sixel Detection
+
+- [x] Inspect the published `pbi v0.1.0` source and installed binary for Sixel support.
+- [x] Fix terminal protocol selection so iTerm prefers Sixel even if Kitty environment markers leak in.
+- [x] Bump crate metadata for a publishable patch release.
+- [x] Verify formatting, tests, install behavior, and publish dry run.
+- [x] Commit the scoped fix.
+
+### Review
+
+- The crates.io `pbi v0.1.0` source and installed binary already contain Sixel support.
+- The protocol detector incorrectly preferred Kitty when `KITTY_WINDOW_ID` existed, even if `TERM_PROGRAM` identified iTerm.
+- `cargo fmt -- --check` passed.
+- `cargo check --locked` passed.
+- `cargo test --locked` passed with 19 unit tests.
+- `cargo install --path . --root /tmp/pbi-local-0.1.1 --force --locked` passed.
+- `cargo publish --dry-run --allow-dirty` passed for `pbi v0.1.1`.

@@ -18,7 +18,13 @@ detects read or write.
 
 ## Installing
 
-Clone the repo, cargo build, copy the binary to somewhere in your $PATH
+From crates.io:
+
+    cargo install pbi --locked
+
+From a checkout:
+
+    cargo install --path . --locked
 
 ## Usage
 
