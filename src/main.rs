@@ -438,7 +438,7 @@ fn run() -> Result<(), Box<dyn Error>> {
 
 fn main() {
     if let Err(err) = run() {
-        eprintln!("PBI: {}", err);
+        eprintln!("pbi: {}", err);
         std::process::exit(1);
     }
 }
