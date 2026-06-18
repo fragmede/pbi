@@ -6,8 +6,9 @@ license = "MIT"
 description = "image aware clipboard command line utility for macOS"
 homepage = "http://github.com/fragmede/pbi/"
 readme = "README.md"
-keywords = ["clipboard", "mac", "macos", "utility", "command", "line", "cli"]
-categories = ["mac","macOS", "command", "line", "cli", "utility"]
+keywords = ["clipboard", "mac", "macos", "cli", "utility"]
+categories = ["command-line-utilities"]
+
 
 [[bin]]
 name = "pbi"
