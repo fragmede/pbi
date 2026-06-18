@@ -4,18 +4,20 @@ use std::ffi::{CStr, CString};
 use std::fmt::{self, Write as FmtWrite};
 use std::io::{self, Cursor, Read, Write};
 use std::os::unix::io::AsRawFd;
+use std::process::Command;
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use image::ImageFormat;
 use libc::S_IFCHR;
 use objc::runtime::{Class, Object, BOOL, YES};
 use objc::{msg_send, sel, sel_impl};
-use objc_foundation::{INSData, INSString, NSData, NSString};
+use objc_foundation::{INSArray, INSData, INSString, NSArray, NSData, NSString};
 use objc_id::Id;
 
 const TEXT_PASTEBOARD_TYPES: [&str; 2] = ["public.utf8-plain-text", "NSStringPboardType"];
 const TIFF_PASTEBOARD_TYPES: [&str; 2] = ["public.tiff", "NSTIFFPboardType"];
 const SVG_PASTEBOARD_TYPES: [&str; 2] = ["public.svg-image", "image/svg+xml"];
+const HTML_PASTEBOARD_TYPES: [&str; 2] = ["public.html", "Apple HTML pasteboard type"];
 const SIXEL_COLOR_LEVELS: usize = 6;
 const SIXEL_PALETTE_SIZE: usize = SIXEL_COLOR_LEVELS * SIXEL_COLOR_LEVELS * SIXEL_COLOR_LEVELS;
 const SIXEL_TRANSPARENT: u8 = u8::MAX;
@@ -84,10 +86,36 @@ enum ClipboardContent {
     Unknown,
 }
 
+#[derive(Debug, Default, Eq, PartialEq)]
+struct Config {
+    debug: bool,
+}
+
 #[derive(Debug, Eq, PartialEq)]
 enum TerminalImageProtocol {
     Kitty,
     Sixel,
+}
+
+fn parse_args<I>(args: I) -> Result<Config, Box<dyn Error>>
+where
+    I: IntoIterator<Item = String>,
+{
+    let mut config = Config::default();
+
+    for arg in args {
+        match arg.as_str() {
+            "--debug" => config.debug = true,
+            _ => {
+                return Err(Box::new(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!("unsupported argument: {arg}"),
+                )));
+            }
+        }
+    }
+
+    Ok(config)
 }
 
 fn action_for_stdin(stdin_is_terminal: bool) -> ClipboardAction {
@@ -181,16 +209,27 @@ fn pasteboard_string_for_types(
     pasteboard_types: &[&str],
 ) -> Result<Option<Vec<u8>>, Box<dyn Error>> {
     for pasteboard_type in pasteboard_types {
-        let ns_type = NSString::from_str(pasteboard_type);
-        let content: *mut NSString = unsafe { msg_send![pb, stringForType: &*ns_type] };
-
-        if !content.is_null() {
-            let content: Id<NSString> = unsafe { Id::from_ptr(content) };
-            return Ok(Some(content.as_str().as_bytes().to_vec()));
+        if let Some(content) = pasteboard_string_for_type(pb, pasteboard_type)? {
+            return Ok(Some(content));
         }
     }
 
     Ok(None)
+}
+
+fn pasteboard_string_for_type(
+    pb: *mut Object,
+    pasteboard_type: &str,
+) -> Result<Option<Vec<u8>>, Box<dyn Error>> {
+    let ns_type = NSString::from_str(pasteboard_type);
+    let content: *mut NSString = unsafe { msg_send![pb, stringForType: &*ns_type] };
+
+    if content.is_null() {
+        return Ok(None);
+    }
+
+    let content: Id<NSString> = unsafe { Id::from_ptr(content) };
+    Ok(Some(content.as_str().as_bytes().to_vec()))
 }
 
 fn pasteboard_data_for_types(
@@ -198,20 +237,96 @@ fn pasteboard_data_for_types(
     pasteboard_types: &[&str],
 ) -> Result<Option<Vec<u8>>, Box<dyn Error>> {
     for pasteboard_type in pasteboard_types {
-        let ns_type = NSString::from_str(pasteboard_type);
-        let data: *mut NSData = unsafe { msg_send![pb, dataForType: &*ns_type] };
-
-        if !data.is_null() {
-            let data: Id<NSData> = unsafe { Id::from_ptr(data) };
-            return Ok(Some(data.bytes().to_vec()));
+        if let Some(data) = pasteboard_data_for_type(pb, pasteboard_type)? {
+            return Ok(Some(data));
         }
     }
 
     Ok(None)
 }
 
-fn get_clipboard_content() -> Result<ClipboardContent, Box<dyn Error>> {
+fn pasteboard_data_for_type(
+    pb: *mut Object,
+    pasteboard_type: &str,
+) -> Result<Option<Vec<u8>>, Box<dyn Error>> {
+    let ns_type = NSString::from_str(pasteboard_type);
+    let data: *mut NSData = unsafe { msg_send![pb, dataForType: &*ns_type] };
+
+    if data.is_null() {
+        return Ok(None);
+    }
+
+    let data: Id<NSData> = unsafe { Id::from_ptr(data) };
+    Ok(Some(data.bytes().to_vec()))
+}
+
+fn pasteboard_type_names(pb: *mut Object) -> Result<Vec<String>, Box<dyn Error>> {
+    let types: *mut NSArray<NSString> = unsafe { msg_send![pb, types] };
+    if types.is_null() {
+        return Ok(Vec::new());
+    }
+
+    let types: Id<NSArray<NSString>> = unsafe { Id::from_ptr(types) };
+    let mut names = Vec::new();
+
+    for i in 0..types.count() {
+        let item: *mut NSString = unsafe { msg_send![&*types, objectAtIndex: i] };
+        if item.is_null() {
+            continue;
+        }
+
+        let item: Id<NSString> = unsafe { Id::from_ptr(item) };
+        names.push(item.as_str().to_string());
+    }
+
+    Ok(names)
+}
+
+fn debug_preview(bytes: &[u8]) -> String {
+    let text = String::from_utf8_lossy(bytes);
+    let mut preview = String::new();
+
+    for ch in text.chars().take(160) {
+        match ch {
+            '\n' => preview.push_str("\\n"),
+            '\r' => preview.push_str("\\r"),
+            '\t' => preview.push_str("\\t"),
+            ch if ch.is_control() => preview.push(' '),
+            ch => preview.push(ch),
+        }
+    }
+
+    preview
+}
+
+fn debug_pasteboard(pb: *mut Object) -> Result<(), Box<dyn Error>> {
+    let type_names = pasteboard_type_names(pb)?;
+    eprintln!("pbi debug: pasteboard types ({})", type_names.len());
+
+    for type_name in type_names {
+        if let Some(text) = pasteboard_string_for_type(pb, &type_name)? {
+            eprintln!(
+                "pbi debug: - {} text_bytes={} preview=\"{}\"",
+                type_name,
+                text.len(),
+                debug_preview(&text)
+            );
+        } else if let Some(data) = pasteboard_data_for_type(pb, &type_name)? {
+            eprintln!("pbi debug: - {} data_bytes={}", type_name, data.len());
+        } else {
+            eprintln!("pbi debug: - {} unavailable", type_name);
+        }
+    }
+
+    Ok(())
+}
+
+fn get_clipboard_content(config: &Config) -> Result<ClipboardContent, Box<dyn Error>> {
     let pb = general_pasteboard()?;
+
+    if config.debug {
+        debug_pasteboard(pb)?;
+    }
 
     if let Some(svg) = pasteboard_data_for_types(pb, &SVG_PASTEBOARD_TYPES)? {
         return Ok(ClipboardContent::Svg(svg));
@@ -227,6 +342,10 @@ fn get_clipboard_content() -> Result<ClipboardContent, Box<dyn Error>> {
         }
 
         return Ok(ClipboardContent::Text(text));
+    }
+
+    if let Some(svg) = svg_from_html_pasteboard(pb, config.debug)? {
+        return Ok(ClipboardContent::Svg(svg));
     }
 
     if let Some(image) = pasteboard_data_for_types(pb, &TIFF_PASTEBOARD_TYPES)? {
@@ -386,6 +505,202 @@ fn is_svg_content(content: &[u8]) -> bool {
     };
 
     strip_svg_preamble(text).is_some_and(is_svg_open_tag)
+}
+
+fn find_ignore_ascii_case(text: &str, needle: &str) -> Option<usize> {
+    let needle = needle.as_bytes();
+
+    if needle.is_empty() {
+        return Some(0);
+    }
+
+    text.as_bytes().windows(needle.len()).position(|window| {
+        window
+            .iter()
+            .zip(needle)
+            .all(|(left, right)| left.eq_ignore_ascii_case(right))
+    })
+}
+
+fn decode_html_entities(value: &str) -> String {
+    value
+        .replace("&amp;", "&")
+        .replace("&quot;", "\"")
+        .replace("&#34;", "\"")
+        .replace("&#39;", "'")
+        .replace("&apos;", "'")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+}
+
+fn is_html_name_char(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b':')
+}
+
+fn extract_html_attr(tag: &str, attr: &str) -> Option<String> {
+    let bytes = tag.as_bytes();
+    let attr = attr.as_bytes();
+    let mut i = 0;
+
+    while i + attr.len() <= bytes.len() {
+        let starts_attr = bytes[i..i + attr.len()]
+            .iter()
+            .zip(attr)
+            .all(|(left, right)| left.eq_ignore_ascii_case(right));
+        let valid_start = i == 0 || !is_html_name_char(bytes[i - 1]);
+
+        if !starts_attr || !valid_start {
+            i += 1;
+            continue;
+        }
+
+        let mut cursor = i + attr.len();
+        while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
+            cursor += 1;
+        }
+
+        if bytes.get(cursor) != Some(&b'=') {
+            i += 1;
+            continue;
+        }
+        cursor += 1;
+
+        while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
+            cursor += 1;
+        }
+
+        let quote = bytes
+            .get(cursor)
+            .copied()
+            .filter(|byte| matches!(byte, b'\'' | b'"'));
+        if quote.is_some() {
+            cursor += 1;
+        }
+
+        let value_start = cursor;
+        while cursor < bytes.len() {
+            if let Some(quote) = quote {
+                if bytes[cursor] == quote {
+                    break;
+                }
+            } else if bytes[cursor].is_ascii_whitespace() || bytes[cursor] == b'>' {
+                break;
+            }
+
+            cursor += 1;
+        }
+
+        return Some(decode_html_entities(&tag[value_start..cursor]));
+    }
+
+    None
+}
+
+fn is_http_url(url: &str) -> bool {
+    starts_with_ignore_ascii_case(url, "https://") || starts_with_ignore_ascii_case(url, "http://")
+}
+
+fn is_svg_url(url: &str) -> bool {
+    if !is_http_url(url) {
+        return false;
+    }
+
+    let path_end = url.find(['?', '#']).unwrap_or(url.len());
+    url[..path_end].to_ascii_lowercase().ends_with(".svg")
+}
+
+fn inline_svg_from_html(html: &str) -> Option<Vec<u8>> {
+    let start = find_ignore_ascii_case(html, "<svg")?;
+    let end_start = find_ignore_ascii_case(&html[start..], "</svg>")? + start;
+    let end = end_start + "</svg>".len();
+    Some(html.as_bytes()[start..end].to_vec())
+}
+
+fn svg_url_from_html(html: &str) -> Option<String> {
+    let mut search_from = 0;
+
+    while search_from < html.len() {
+        let img_offset = find_ignore_ascii_case(&html[search_from..], "<img")?;
+        let img_start = search_from + img_offset;
+        let tag_end = html[img_start..].find('>')? + img_start;
+        let tag = &html[img_start..=tag_end];
+
+        if let Some(src) = extract_html_attr(tag, "src") {
+            if is_svg_url(&src) {
+                return Some(src);
+            }
+        }
+
+        search_from = tag_end + 1;
+    }
+
+    None
+}
+
+fn fetch_svg_url(url: &str) -> Result<Vec<u8>, Box<dyn Error>> {
+    let output = Command::new("/usr/bin/curl")
+        .args(["-fsSL", "--max-time", "10", "--proto", "=https,http", url])
+        .output()?;
+
+    if !output.status.success() {
+        return Err(Box::new(io::Error::new(
+            io::ErrorKind::Other,
+            format!("failed to fetch SVG URL: {url}"),
+        )));
+    }
+
+    if !is_svg_content(&output.stdout) {
+        return Err(Box::new(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("URL did not return SVG content: {url}"),
+        )));
+    }
+
+    Ok(output.stdout)
+}
+
+fn svg_from_html(html: &[u8], debug: bool) -> Result<Option<Vec<u8>>, Box<dyn Error>> {
+    let Ok(html) = std::str::from_utf8(html) else {
+        return Ok(None);
+    };
+
+    if let Some(svg) = inline_svg_from_html(html) {
+        if debug {
+            eprintln!("pbi debug: detected inline SVG inside HTML pasteboard content");
+        }
+        return Ok(Some(svg));
+    }
+
+    if let Some(url) = svg_url_from_html(html) {
+        if debug {
+            eprintln!("pbi debug: detected SVG image URL in HTML: {url}");
+            eprintln!("pbi debug: fetching SVG URL");
+        }
+        return Ok(Some(fetch_svg_url(&url)?));
+    }
+
+    if debug {
+        eprintln!(
+            "pbi debug: HTML pasteboard content did not contain inline SVG or an SVG img src"
+        );
+    }
+
+    Ok(None)
+}
+
+fn svg_from_html_pasteboard(
+    pb: *mut Object,
+    debug: bool,
+) -> Result<Option<Vec<u8>>, Box<dyn Error>> {
+    if let Some(html) = pasteboard_string_for_types(pb, &HTML_PASTEBOARD_TYPES)? {
+        return svg_from_html(&html, debug);
+    }
+
+    if let Some(html) = pasteboard_data_for_types(pb, &HTML_PASTEBOARD_TYPES)? {
+        return svg_from_html(&html, debug);
+    }
+
+    Ok(None)
 }
 
 fn contains_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
@@ -632,15 +947,25 @@ fn write_sixel_graphics(image_data: &[u8]) -> io::Result<()> {
     Ok(())
 }
 
-fn pbcopy() -> Result<(), Box<dyn Error>> {
+fn pbcopy(config: &Config) -> Result<(), Box<dyn Error>> {
     let mut content = Vec::new();
     io::stdin().read_to_end(&mut content)?;
 
+    if config.debug {
+        eprintln!("pbi debug: stdin bytes={}", content.len());
+    }
+
     if is_svg_content(&content) {
+        if config.debug {
+            eprintln!("pbi debug: stdin detected as SVG");
+        }
         return set_pasteboard_svg(content);
     }
 
     if let Some(tiff_data) = tiff_from_image_data(&content) {
+        if config.debug {
+            eprintln!("pbi debug: stdin detected as raster image");
+        }
         return set_pasteboard_tiff(tiff_data);
     }
 
@@ -651,11 +976,15 @@ fn pbcopy() -> Result<(), Box<dyn Error>> {
         )
     })?;
 
+    if config.debug {
+        eprintln!("pbi debug: stdin detected as UTF-8 text");
+    }
+
     set_pasteboard_text(&text)
 }
 
-fn pbpaste() -> Result<(), Box<dyn Error>> {
-    match get_clipboard_content()? {
+fn pbpaste(config: &Config) -> Result<(), Box<dyn Error>> {
+    match get_clipboard_content(config)? {
         ClipboardContent::Text(text) => {
             io::stdout().write_all(&text)?;
         }
@@ -691,9 +1020,22 @@ fn pbpaste() -> Result<(), Box<dyn Error>> {
 }
 
 fn run() -> Result<(), Box<dyn Error>> {
-    match action_for_stdin(stdin_is_terminal()) {
-        ClipboardAction::Copy => pbcopy(),
-        ClipboardAction::Paste => pbpaste(),
+    let config = parse_args(env::args().skip(1))?;
+    let stdin_is_terminal = stdin_is_terminal();
+    let action = action_for_stdin(stdin_is_terminal);
+
+    if config.debug {
+        eprintln!(
+            "pbi debug: stdin_is_terminal={} action={:?} stdout_device={}",
+            stdin_is_terminal,
+            action,
+            stdout_output_device()
+        );
+    }
+
+    match action {
+        ClipboardAction::Copy => pbcopy(&config),
+        ClipboardAction::Paste => pbpaste(&config),
     }
 }
 
@@ -707,8 +1049,9 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::{
-        action_for_stdin, encode_sixel_image, is_svg_content, terminal_image_protocol_from_env,
-        ClipboardAction, TerminalImageProtocol,
+        action_for_stdin, encode_sixel_image, inline_svg_from_html, is_svg_content, parse_args,
+        svg_url_from_html, terminal_image_protocol_from_env, ClipboardAction, Config,
+        TerminalImageProtocol,
     };
     use image::{Rgba, RgbaImage};
 
@@ -720,6 +1063,19 @@ mod tests {
     #[test]
     fn paste_when_stdin_is_terminal() {
         assert_eq!(action_for_stdin(true), ClipboardAction::Paste);
+    }
+
+    #[test]
+    fn parses_debug_flag() {
+        assert_eq!(
+            parse_args(["--debug".to_string()]).unwrap(),
+            Config { debug: true }
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_flag() {
+        assert!(parse_args(["--bogus".to_string()]).is_err());
     }
 
     #[test]
@@ -814,5 +1170,25 @@ mod tests {
     #[test]
     fn rejects_non_utf8_data_as_svg() {
         assert!(!is_svg_content(&[0xff, 0xd8, 0xff, 0x00]));
+    }
+
+    #[test]
+    fn extracts_github_svg_image_url_from_html() {
+        let html = r#"<meta charset='utf-8'><img src="https://github.com/fragmede/pbi/raw/main/assets/pbi-icon.svg" alt="pbi clipboard icon"/>"#;
+
+        assert_eq!(
+            svg_url_from_html(html).as_deref(),
+            Some("https://github.com/fragmede/pbi/raw/main/assets/pbi-icon.svg")
+        );
+    }
+
+    #[test]
+    fn extracts_inline_svg_from_html() {
+        let html = r#"<div><svg viewBox="0 0 1 1"><path d=""/></svg></div>"#;
+
+        assert_eq!(
+            inline_svg_from_html(html).as_deref(),
+            Some(br#"<svg viewBox="0 0 1 1"><path d=""/></svg>"#.as_slice())
+        );
     }
 }

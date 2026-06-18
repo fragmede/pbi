@@ -62,3 +62,12 @@
 - [x] Add SVG detection tests.
 - [x] Verify checks/tests.
 - [x] Commit the scoped SVG support.
+
+## Follow-up: Debug SVG HTML Clipboard
+
+- [x] Inspect the current GitHub SVG pasteboard payload.
+- [x] Add `--debug` pasteboard diagnostics.
+- [x] Resolve SVGs referenced by HTML clipboard fragments.
+- [x] Add focused parser tests.
+- [x] Verify checks/tests and live clipboard behavior.
+- [x] Commit the scoped debug and HTML-SVG fix.
