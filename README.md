@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/pbi-icon.svg" alt="pbi clipboard icon" width="156">
+</p>
+
 # pbi
 
 Image-aware version of `pbcopy` and `pbpaste` for macOS.

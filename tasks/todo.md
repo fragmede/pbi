@@ -24,3 +24,10 @@
 - [x] Update binary target, docs, and error prefix to `pbi`.
 - [x] Verify lowercase build target.
 - [x] Commit the scoped lowercase rename.
+
+## Follow-up: README Icon
+
+- [x] Create a cutesy project icon asset.
+- [x] Add the icon to the README.
+- [x] Verify the asset and README reference.
+- [x] Commit the scoped icon update.

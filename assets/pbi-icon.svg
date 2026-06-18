@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">pbi icon</title>
+  <desc id="desc">A cute clipboard character for the pbi pasteboard utility.</desc>
+  <defs>
+    <linearGradient id="bg" x1="80" y1="54" x2="424" y2="458" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#9ee8d1"/>
+      <stop offset="0.52" stop-color="#ffd88f"/>
+      <stop offset="1" stop-color="#ff9fb6"/>
+    </linearGradient>
+    <linearGradient id="paper" x1="162" y1="118" x2="350" y2="396" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#f5f0ff"/>
+    </linearGradient>
+    <filter id="softShadow" x="-20%" y="-20%" width="140%" height="145%">
+      <feDropShadow dx="0" dy="14" stdDeviation="16" flood-color="#6d5878" flood-opacity="0.22"/>
+    </filter>
+  </defs>
+
+  <rect x="36" y="36" width="440" height="440" rx="108" fill="url(#bg)"/>
+  <circle cx="114" cy="118" r="22" fill="#fff7c7" opacity="0.86"/>
+  <circle cx="410" cy="394" r="18" fill="#fff7c7" opacity="0.82"/>
+  <path d="M395 104l11 24 25 9-25 10-11 24-11-24-25-10 25-9 11-24z" fill="#ffffff" opacity="0.9"/>
+  <path d="M112 350l8 17 18 7-18 7-8 17-8-17-18-7 18-7 8-17z" fill="#ffffff" opacity="0.85"/>
+
+  <g filter="url(#softShadow)">
+    <rect x="144" y="112" width="224" height="292" rx="38" fill="#8a6fbb"/>
+    <rect x="162" y="132" width="188" height="250" rx="28" fill="url(#paper)"/>
+    <rect x="202" y="82" width="108" height="76" rx="24" fill="#6d58a8"/>
+    <rect x="220" y="68" width="72" height="46" rx="22" fill="#fff7c7"/>
+
+    <g aria-label="cute face">
+      <circle cx="221" cy="237" r="12" fill="#40375f"/>
+      <circle cx="291" cy="237" r="12" fill="#40375f"/>
+      <circle cx="208" cy="264" r="10" fill="#ff9fb6" opacity="0.72"/>
+      <circle cx="304" cy="264" r="10" fill="#ff9fb6" opacity="0.72"/>
+      <path d="M229 278c14 18 40 18 54 0" fill="none" stroke="#40375f" stroke-width="12" stroke-linecap="round"/>
+    </g>
+
+    <rect x="199" y="312" width="114" height="44" rx="14" fill="#e5dfff"/>
+    <path d="M230 334h45" stroke="#6d58a8" stroke-width="12" stroke-linecap="round"/>
+    <path d="M268 315l20 19-20 19" fill="none" stroke="#6d58a8" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+
+  <g filter="url(#softShadow)">
+    <rect x="320" y="282" width="94" height="80" rx="20" fill="#ffffff"/>
+    <rect x="333" y="296" width="68" height="52" rx="12" fill="#8bd7ff"/>
+    <circle cx="383" cy="310" r="8" fill="#fff7c7"/>
+    <path d="M335 346l22-24 15 16 9-9 20 17z" fill="#63bf8f"/>
+  </g>
+
+  <path d="M174 420c44 22 120 24 170 0" fill="none" stroke="#ffffff" stroke-width="16" stroke-linecap="round" opacity="0.75"/>
+</svg>
